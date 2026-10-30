@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 6 — OCPP message handlers</title>
+<style>
+:root{--bg:#fbfaf8;--panel:#fff;--ink:#1d1d1f;--mute:#6b6b70;--line:#e6e3dd;--accent:#0a7c5a;--accent-soft:#e3f3ec;--warn:#9a4b00;--warn-soft:#fdf0e1;--code-bg:#f4f2ee;--code-ink:#24292f}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--accent:#3fcf9a;--accent-soft:#16302a;--warn:#f3a35c;--warn-soft:#33251a;--code-bg:#202024;--code-ink:#e6e6e6}}
+:root[data-theme="dark"]{--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--accent:#3fcf9a;--accent-soft:#16302a;--warn:#f3a35c;--warn-soft:#33251a;--code-bg:#202024;--code-ink:#e6e6e6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{display:grid;grid-template-columns:220px minmax(0,1fr);max-width:1100px;margin:0 auto;gap:40px;padding:32px 16px}
+aside{position:sticky;top:24px;align-self:start;display:flex;flex-direction:column;gap:2px;font-size:14px}
+aside a{color:var(--mute);text-decoration:none;padding:5px 10px;border-radius:6px}
+aside a:hover{color:var(--ink);background:var(--code-bg)}
+aside a.on{color:var(--accent);background:var(--accent-soft);font-weight:600}
+main{min-width:0;max-width:760px}
+h1{font-size:30px;line-height:1.2;margin:0 0 8px;letter-spacing:-.01em}
+h2{font-size:21px;margin:36px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
+h3{font-size:17px;margin:24px 0 6px}
+a{color:var(--accent)}
+code{font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+.code{margin:12px 0 18px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--code-bg)}
+.file{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;border-bottom:1px solid var(--line);font:12.5px ui-monospace,Menlo,Consolas,monospace;color:var(--mute);background:var(--panel)}
+.copy{font:12px system-ui,sans-serif;border:1px solid var(--line);background:transparent;color:var(--mute);border-radius:5px;padding:2px 8px;cursor:pointer}
+.copy:hover{color:var(--ink)}
+pre{margin:0;padding:14px 16px;overflow-x:auto}
+pre code{background:none;padding:0;color:var(--code-ink);white-space:pre}
+.note,.warn{padding:10px 14px;border-radius:8px;margin:14px 0;border-left:3px solid var(--accent);background:var(--accent-soft)}
+.warn{border-color:var(--warn);background:var(--warn-soft)}
+ul.todo{list-style:none;padding-left:0}
+ul.todo li{padding:3px 0}
+ul.todo input{accent-color:var(--accent);margin-right:6px;transform:translateY(1px)}
+ul.todo input:checked+span{color:var(--mute);text-decoration:line-through}
+.pn{display:flex;justify-content:space-between;margin:48px 0 16px;padding-top:16px;border-top:1px solid var(--line)}
+.pn a{text-decoration:none;font-weight:600}
+@media (max-width:820px){.wrap{grid-template-columns:1fr;gap:16px}aside{position:static;flex-direction:row;overflow-x:auto;white-space:nowrap;padding-bottom:6px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<aside>
+<a href="index.html">Start here</a>
+<a href="day-01.html">Day 1 · Setup</a>
+<a href="day-02.html">Day 2 · Schema</a>
+<a href="day-03.html">Day 3 · Isolation</a>
+<a href="day-04.html">Day 4 · Access engine</a>
+<a href="day-05.html">Day 5 · OCPP gateway</a>
+<a href="day-06.html" class=on>Day 6 · Handlers</a>
+<a href="day-07.html">Day 7 · Sessions</a>
+<a href="day-08.html">Day 8 · Bot onboarding</a>
+<a href="day-09.html">Day 9 · QR flow</a>
+<a href="day-10.html">Day 10 · Wallet</a>
+<a href="day-11.html">Day 11 · Auth</a>
+<a href="day-12.html">Day 12 · Super admin</a>
+<a href="day-13.html">Day 13 · Tenant dashboard</a>
+<a href="day-14.html">Day 14 · Go live</a>
+</aside>
+<main>
+<h1>Day 6 — OCPP message handlers</h1>
+<p><strong>Goal:</strong> every message the charger sends updates the database correctly.</p>
+<h2>What each handler does</h2>
+<ul>
+<li><strong>BootNotification</strong> → <code>isOnline = true</code>, reply <code>Accepted</code> + heartbeat <code>interval</code>.</li>
+<li><strong>Heartbeat</strong> → update <code>lastSeenAt</code>.</li>
+<li><strong>StatusNotification</strong> → save connector status. <code>connectorId: 0</code> means the whole charger — ignore.</li>
+<li><strong>Authorize</strong> → accept only an <code>idTag</code> that belongs to a <code>PENDING</code> session.</li>
+<li><strong>StartTransaction</strong> → find the <code>PENDING</code> session by <code>idTag</code>, mark <code>ACTIVE</code>, return our <code>transactionId</code>.</li>
+<li><strong>MeterValues</strong> → save latest Wh reading, emit <code>session:meter</code>.</li>
+<li><strong>StopTransaction</strong> → bill the session (<code>finishSession</code>), emit <code>session:stopped</code>.</li>
+</ul>
+<div class="warn">Always reply to <code>StopTransaction</code>, even if billing fails. Otherwise the charger retries forever.</div>
+<h2>Tasks</h2>
+<ul class="todo">
+<li><label><input type="checkbox" data-k="day-06-1"> <span>Write <code>billing.ts</code> (<code>finishSession</code>)</span></label></li>
+<li><label><input type="checkbox" data-k="day-06-2"> <span>Replace <code>handlers.ts</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-06-3"> <span>Watch connector status change in Prisma Studio when the sim boots</span></label></li>
+</ul>
+<div class="code"><div class="file"><span>apps/api/src/services/billing.ts</span><button class="copy">Copy</button></div><pre><code>import { prisma, Prisma } from &quot;@ev/db&quot;;
+import { events } from &quot;../events&quot;;
+
+export async function finishSession(transactionId: number, meterStopWh: number, stoppedAt: Date) {
+  const session = await prisma.$transaction(async (tx) =&gt; {
+    const s = await tx.chargingSession.findUnique({ where: { transactionId } });
+    if (!s || s.status !== &quot;ACTIVE&quot;) return null; // unknown or already billed → idempotent
+
+    const usedWh = Math.max(0, meterStopWh - (s.meterStartWh ?? meterStopWh));
+    const energyKwh = new Prisma.Decimal(usedWh).div(1000);
+    const amount = energyKwh.mul(s.pricePerKwh).toDecimalPlaces(2);
+
+    if (amount.gt(0)) {
+      await tx.user.update({ where: { id: s.userId }, data: { walletBalance: { decrement: amount } } });
+    }
+    return tx.chargingSession.update({
+      where: { id: s.id },
+      data: { status: &quot;COMPLETED&quot;, meterStopWh, meterLastWh: meterStopWh, energyKwh, amount, stoppedAt },
+    });
+  });
+  if (session) events.emit(&quot;session:stopped&quot;, session);
+}</code></pre></div>
+<div class="code"><div class="file"><span>apps/api/src/ocpp/handlers.ts — replace</span><button class="copy">Copy</button></div><pre><code>import { prisma } from &quot;@ev/db&quot;;
+import { events } from &quot;../events&quot;;
+import { finishSession } from &quot;../services/billing&quot;;
+
+type Handler = (ocppId: string, payload: any) =&gt; Promise&lt;object&gt;;
+const now = () =&gt; new Date().toISOString();
+
+// Energy reading in Wh from a MeterValues payload (handles Wh or kWh units)
+function readEnergyWh(meterValue: any[]): number | null {
+  for (const mv of meterValue ?? []) {
+    for (const sv of mv.sampledValue ?? []) {
+      const isEnergy = !sv.measurand || sv.measurand === &quot;Energy.Active.Import.Register&quot;;
+      if (isEnergy) return Math.round(Number(sv.value) * (sv.unit === &quot;kWh&quot; ? 1000 : 1));
+    }
+  }
+  return null;
+}
+
+export const handlers: Record&lt;string, Handler&gt; = {
+  BootNotification: async (ocppId) =&gt; {
+    await prisma.chargePoint.update({ where: { ocppId }, data: { isOnline: true, lastSeenAt: new Date() } });
+    return { status: &quot;Accepted&quot;, currentTime: now(), interval: 60 };
+  },
+
+  Heartbeat: async (ocppId) =&gt; {
+    await prisma.chargePoint.update({ where: { ocppId }, data: { isOnline: true, lastSeenAt: new Date() } });
+    return { currentTime: now() };
+  },
+
+  StatusNotification: async (ocppId, p) =&gt; {
+    if (p.connectorId === 0) return {};
+    const cp = await prisma.chargePoint.findUniqueOrThrow({ where: { ocppId } });
+    await prisma.connector.upsert({
+      where: { chargePointId_connectorId: { chargePointId: cp.id, connectorId: p.connectorId } },
+      update: { status: p.status },
+      create: { chargePointId: cp.id, connectorId: p.connectorId, status: p.status },
+    });
+    return {};
+  },
+
+  Authorize: async (_ocppId, p) =&gt; {
+    const s = await prisma.chargingSession.findUnique({ where: { idTag: p.idTag } });
+    return { idTagInfo: { status: s?.status === &quot;PENDING&quot; ? &quot;Accepted&quot; : &quot;Invalid&quot; } };
+  },
+
+  StartTransaction: async (_ocppId, p) =&gt; {
+    const s = await prisma.chargingSession.findUnique({ where: { idTag: p.idTag } });
+    if (!s || s.status !== &quot;PENDING&quot;) return { transactionId: 0, idTagInfo: { status: &quot;Invalid&quot; } };
+
+    const started = await prisma.chargingSession.update({
+      where: { id: s.id },
+      data: { status: &quot;ACTIVE&quot;, meterStartWh: p.meterStart, meterLastWh: p.meterStart, startedAt: new Date(p.timestamp) },
+    });
+    events.emit(&quot;session:started&quot;, started);
+    return { transactionId: started.transactionId, idTagInfo: { status: &quot;Accepted&quot; } };
+  },
+
+  MeterValues: async (_ocppId, p) =&gt; {
+    const wh = readEnergyWh(p.meterValue);
+    if (!p.transactionId || wh === null) return {};
+    const s = await prisma.chargingSession.update({ where: { transactionId: p.transactionId }, data: { meterLastWh: wh } });
+    events.emit(&quot;session:meter&quot;, s);
+    return {};
+  },
+
+  StopTransaction: async (_ocppId, p) =&gt; {
+    try {
+      await finishSession(p.transactionId, p.meterStop, new Date(p.timestamp));
+    } catch (err) {
+      console.error(&quot;[billing] failed&quot;, p.transactionId, err); // fix by hand; never block the charger
+    }
+    return { idTagInfo: { status: &quot;Accepted&quot; } };
+  },
+};</code></pre></div>
+<h2>Done when</h2>
+<ul class="todo">
+<li><label><input type="checkbox" data-k="day-06-4"> <span>Start the sim → <code>CP_TEST01.isOnline = true</code>, both connectors <code>Available</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-06-5"> <span>Stop the sim → <code>isOnline = false</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-06-6"> <span>You can explain why billing reads <code>pricePerKwh</code> from the <strong>session</strong>, not the tariff table</span></label></li>
+</ul>
+<nav class="pn"><a href="day-05.html">← Day 5 · OCPP gateway</a><a href="day-07.html">Day 7 · Sessions →</a></nav>
+</main>
+</div>
+<script>
+document.querySelectorAll('.copy').forEach(b=>b.onclick=()=>{navigator.clipboard.writeText(b.closest('.code').querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)});
+document.querySelectorAll('input[data-k]').forEach(c=>{try{c.checked=localStorage.getItem(c.dataset.k)==='1'}catch(e){}c.onchange=()=>{try{localStorage.setItem(c.dataset.k,c.checked?'1':'0')}catch(e){}}});
+</script>
+</body>
+</html>

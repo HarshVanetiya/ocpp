@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 3 — Tenant isolation</title>
+<style>
+:root{--bg:#fbfaf8;--panel:#fff;--ink:#1d1d1f;--mute:#6b6b70;--line:#e6e3dd;--accent:#0a7c5a;--accent-soft:#e3f3ec;--warn:#9a4b00;--warn-soft:#fdf0e1;--code-bg:#f4f2ee;--code-ink:#24292f}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--accent:#3fcf9a;--accent-soft:#16302a;--warn:#f3a35c;--warn-soft:#33251a;--code-bg:#202024;--code-ink:#e6e6e6}}
+:root[data-theme="dark"]{--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--accent:#3fcf9a;--accent-soft:#16302a;--warn:#f3a35c;--warn-soft:#33251a;--code-bg:#202024;--code-ink:#e6e6e6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{display:grid;grid-template-columns:220px minmax(0,1fr);max-width:1100px;margin:0 auto;gap:40px;padding:32px 16px}
+aside{position:sticky;top:24px;align-self:start;display:flex;flex-direction:column;gap:2px;font-size:14px}
+aside a{color:var(--mute);text-decoration:none;padding:5px 10px;border-radius:6px}
+aside a:hover{color:var(--ink);background:var(--code-bg)}
+aside a.on{color:var(--accent);background:var(--accent-soft);font-weight:600}
+main{min-width:0;max-width:760px}
+h1{font-size:30px;line-height:1.2;margin:0 0 8px;letter-spacing:-.01em}
+h2{font-size:21px;margin:36px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
+h3{font-size:17px;margin:24px 0 6px}
+a{color:var(--accent)}
+code{font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+.code{margin:12px 0 18px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--code-bg)}
+.file{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;border-bottom:1px solid var(--line);font:12.5px ui-monospace,Menlo,Consolas,monospace;color:var(--mute);background:var(--panel)}
+.copy{font:12px system-ui,sans-serif;border:1px solid var(--line);background:transparent;color:var(--mute);border-radius:5px;padding:2px 8px;cursor:pointer}
+.copy:hover{color:var(--ink)}
+pre{margin:0;padding:14px 16px;overflow-x:auto}
+pre code{background:none;padding:0;color:var(--code-ink);white-space:pre}
+.note,.warn{padding:10px 14px;border-radius:8px;margin:14px 0;border-left:3px solid var(--accent);background:var(--accent-soft)}
+.warn{border-color:var(--warn);background:var(--warn-soft)}
+ul.todo{list-style:none;padding-left:0}
+ul.todo li{padding:3px 0}
+ul.todo input{accent-color:var(--accent);margin-right:6px;transform:translateY(1px)}
+ul.todo input:checked+span{color:var(--mute);text-decoration:line-through}
+.pn{display:flex;justify-content:space-between;margin:48px 0 16px;padding-top:16px;border-top:1px solid var(--line)}
+.pn a{text-decoration:none;font-weight:600}
+@media (max-width:820px){.wrap{grid-template-columns:1fr;gap:16px}aside{position:static;flex-direction:row;overflow-x:auto;white-space:nowrap;padding-bottom:6px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<aside>
+<a href="index.html">Start here</a>
+<a href="day-01.html">Day 1 · Setup</a>
+<a href="day-02.html">Day 2 · Schema</a>
+<a href="day-03.html" class=on>Day 3 · Isolation</a>
+<a href="day-04.html">Day 4 · Access engine</a>
+<a href="day-05.html">Day 5 · OCPP gateway</a>
+<a href="day-06.html">Day 6 · Handlers</a>
+<a href="day-07.html">Day 7 · Sessions</a>
+<a href="day-08.html">Day 8 · Bot onboarding</a>
+<a href="day-09.html">Day 9 · QR flow</a>
+<a href="day-10.html">Day 10 · Wallet</a>
+<a href="day-11.html">Day 11 · Auth</a>
+<a href="day-12.html">Day 12 · Super admin</a>
+<a href="day-13.html">Day 13 · Tenant dashboard</a>
+<a href="day-14.html">Day 14 · Go live</a>
+</aside>
+<main>
+<h1>Day 3 — Tenant isolation</h1>
+<p><strong>Goal:</strong> a <code>tenantDb(tenantId)</code> client that automatically adds <code>tenantId</code> to every query, so a tenant admin can never touch another tenant's rows.</p>
+<h2>How it works</h2>
+<p><code>prisma.$extends({ query })</code> lets you intercept every query before it runs. We add <code>where.tenantId</code> on reads/updates/deletes and <code>data.tenantId</code> on creates.</p>
+<ul>
+<li><strong>Tenant models</strong> (have <code>tenantId</code>): <code>ChargePoint</code>, <code>TenantMembership</code>, <code>ChargerTariffRule</code>, <code>ChargingSession</code></li>
+<li><strong><code>Connector</code></strong> has no <code>tenantId</code> → filter through its charger: <code>chargePoint: { tenantId }</code></li>
+<li><strong>Everything else</strong> (<code>User</code>, <code>Tenant</code>, <code>AdminUser</code>, <code>Payment</code>) → blocked in <code>tenantDb</code>. Tenant routes have no reason to touch them directly.</li>
+</ul>
+<h2>Tasks</h2>
+<ul class="todo">
+<li><label><input type="checkbox" data-k="day-03-1"> <span>Write <code>tenantDb.ts</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-03-2"> <span>Export it from <code>@ev/db</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-03-3"> <span>Write the isolation test</span></label></li>
+</ul>
+<div class="code"><div class="file"><span>packages/db/src/tenantDb.ts</span><button class="copy">Copy</button></div><pre><code>import { prisma } from &quot;./client&quot;;
+
+const TENANT_MODELS = new Set([&quot;ChargePoint&quot;, &quot;TenantMembership&quot;, &quot;ChargerTariffRule&quot;, &quot;ChargingSession&quot;]);
+const WHERE_OPS = new Set([
+  &quot;findUnique&quot;, &quot;findUniqueOrThrow&quot;, &quot;findFirst&quot;, &quot;findFirstOrThrow&quot;, &quot;findMany&quot;,
+  &quot;count&quot;, &quot;aggregate&quot;, &quot;groupBy&quot;, &quot;update&quot;, &quot;updateMany&quot;, &quot;delete&quot;, &quot;deleteMany&quot;,
+]);
+
+export function tenantDb(tenantId: string) {
+  return prisma.$extends({
+    query: {
+      $allModels: {
+        async $allOperations({ model, operation, args, query }) {
+          const a = (args ?? {}) as any;
+
+          if (model === &quot;Connector&quot;) {
+            if (WHERE_OPS.has(operation)) a.where = { ...a.where, chargePoint: { tenantId } };
+            else throw new Error(`Connector.${operation} not allowed in tenantDb`);
+            return query(a);
+          }
+
+          if (!TENANT_MODELS.has(model)) {
+            throw new Error(`${model} is not accessible from tenantDb`);
+          }
+
+          if (WHERE_OPS.has(operation)) a.where = { ...a.where, tenantId };
+          if (operation === &quot;create&quot;) a.data = { ...a.data, tenantId };
+          if (operation === &quot;createMany&quot;) {
+            a.data = [].concat(a.data).map((d: object) =&gt; ({ ...d, tenantId }));
+          }
+          if (operation === &quot;upsert&quot;) {
+            a.where = { ...a.where, tenantId };
+            a.create = { ...a.create, tenantId };
+          }
+          return query(a);
+        },
+      },
+    },
+  });
+}
+
+export type TenantDb = ReturnType&lt;typeof tenantDb&gt;;</code></pre></div>
+<div class="code"><div class="file"><span>packages/db/src/index.ts — add</span><button class="copy">Copy</button></div><pre><code>export { tenantDb, type TenantDb } from &quot;./tenantDb&quot;;</code></pre></div>
+<div class="warn">Always pass <code>tenantId</code> as a plain field. Never use <code>tenant: { connect: ... }</code> with <code>tenantDb</code> — it will conflict with the injected <code>tenantId</code>.</div>
+<div class="warn"><code>include</code> / nested relations are <strong>not</strong> filtered. Query tenant models at the top level. Example: load chargers with <code>tenantDb(...).chargePoint.findMany({ include: { connectors: true } })</code> — fine, because the connectors belong to a charger you already own.</div>
+<h2>Test it</h2>
+<p>Create a second tenant + charger in Prisma Studio (e.g. <code>CP_OTHER</code>), then:</p>
+<div class="code"><div class="file"><span>packages/db/scripts/isolation-check.ts</span><button class="copy">Copy</button></div><pre><code>import { prisma, tenantDb } from &quot;../src&quot;;
+
+async function main() {
+  const tata = await prisma.tenant.findUniqueOrThrow({ where: { slug: &quot;tata-fleet&quot; } });
+  const db = tenantDb(tata.id);
+
+  console.log(await db.chargePoint.findMany({ select: { ocppId: true } }));       // only CP_TEST01
+  console.log(await db.chargePoint.findFirst({ where: { ocppId: &quot;CP_OTHER&quot; } })); // null
+  await db.user.findMany().catch((e) =&gt; console.log(&quot;blocked:&quot;, e.message));     // throws
+}
+
+main().finally(() =&gt; prisma.$disconnect());</code></pre></div>
+<div class="code"><div class="file"><span>terminal</span><button class="copy">Copy</button></div><pre><code>pnpm --filter @ev/db exec tsx scripts/isolation-check.ts</code></pre></div>
+<h2>Done when</h2>
+<ul class="todo">
+<li><label><input type="checkbox" data-k="day-03-4"> <span>Tata's client sees only Tata's charger</span></label></li>
+<li><label><input type="checkbox" data-k="day-03-5"> <span>Reading another tenant's charger by <code>ocppId</code> returns <code>null</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-03-6"> <span><code>db.user.findMany()</code> throws</span></label></li>
+</ul>
+<nav class="pn"><a href="day-02.html">← Day 2 · Schema</a><a href="day-04.html">Day 4 · Access engine →</a></nav>
+</main>
+</div>
+<script>
+document.querySelectorAll('.copy').forEach(b=>b.onclick=()=>{navigator.clipboard.writeText(b.closest('.code').querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)});
+document.querySelectorAll('input[data-k]').forEach(c=>{try{c.checked=localStorage.getItem(c.dataset.k)==='1'}catch(e){}c.onchange=()=>{try{localStorage.setItem(c.dataset.k,c.checked?'1':'0')}catch(e){}}});
+</script>
+</body>
+</html>

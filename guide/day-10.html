@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 10 — Wallet &amp; Razorpay top-up</title>
+<style>
+:root{--bg:#fbfaf8;--panel:#fff;--ink:#1d1d1f;--mute:#6b6b70;--line:#e6e3dd;--accent:#0a7c5a;--accent-soft:#e3f3ec;--warn:#9a4b00;--warn-soft:#fdf0e1;--code-bg:#f4f2ee;--code-ink:#24292f}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--accent:#3fcf9a;--accent-soft:#16302a;--warn:#f3a35c;--warn-soft:#33251a;--code-bg:#202024;--code-ink:#e6e6e6}}
+:root[data-theme="dark"]{--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--accent:#3fcf9a;--accent-soft:#16302a;--warn:#f3a35c;--warn-soft:#33251a;--code-bg:#202024;--code-ink:#e6e6e6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{display:grid;grid-template-columns:220px minmax(0,1fr);max-width:1100px;margin:0 auto;gap:40px;padding:32px 16px}
+aside{position:sticky;top:24px;align-self:start;display:flex;flex-direction:column;gap:2px;font-size:14px}
+aside a{color:var(--mute);text-decoration:none;padding:5px 10px;border-radius:6px}
+aside a:hover{color:var(--ink);background:var(--code-bg)}
+aside a.on{color:var(--accent);background:var(--accent-soft);font-weight:600}
+main{min-width:0;max-width:760px}
+h1{font-size:30px;line-height:1.2;margin:0 0 8px;letter-spacing:-.01em}
+h2{font-size:21px;margin:36px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
+h3{font-size:17px;margin:24px 0 6px}
+a{color:var(--accent)}
+code{font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+.code{margin:12px 0 18px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--code-bg)}
+.file{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;border-bottom:1px solid var(--line);font:12.5px ui-monospace,Menlo,Consolas,monospace;color:var(--mute);background:var(--panel)}
+.copy{font:12px system-ui,sans-serif;border:1px solid var(--line);background:transparent;color:var(--mute);border-radius:5px;padding:2px 8px;cursor:pointer}
+.copy:hover{color:var(--ink)}
+pre{margin:0;padding:14px 16px;overflow-x:auto}
+pre code{background:none;padding:0;color:var(--code-ink);white-space:pre}
+.note,.warn{padding:10px 14px;border-radius:8px;margin:14px 0;border-left:3px solid var(--accent);background:var(--accent-soft)}
+.warn{border-color:var(--warn);background:var(--warn-soft)}
+ul.todo{list-style:none;padding-left:0}
+ul.todo li{padding:3px 0}
+ul.todo input{accent-color:var(--accent);margin-right:6px;transform:translateY(1px)}
+ul.todo input:checked+span{color:var(--mute);text-decoration:line-through}
+.pn{display:flex;justify-content:space-between;margin:48px 0 16px;padding-top:16px;border-top:1px solid var(--line)}
+.pn a{text-decoration:none;font-weight:600}
+@media (max-width:820px){.wrap{grid-template-columns:1fr;gap:16px}aside{position:static;flex-direction:row;overflow-x:auto;white-space:nowrap;padding-bottom:6px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<aside>
+<a href="index.html">Start here</a>
+<a href="day-01.html">Day 1 · Setup</a>
+<a href="day-02.html">Day 2 · Schema</a>
+<a href="day-03.html">Day 3 · Isolation</a>
+<a href="day-04.html">Day 4 · Access engine</a>
+<a href="day-05.html">Day 5 · OCPP gateway</a>
+<a href="day-06.html">Day 6 · Handlers</a>
+<a href="day-07.html">Day 7 · Sessions</a>
+<a href="day-08.html">Day 8 · Bot onboarding</a>
+<a href="day-09.html">Day 9 · QR flow</a>
+<a href="day-10.html" class=on>Day 10 · Wallet</a>
+<a href="day-11.html">Day 11 · Auth</a>
+<a href="day-12.html">Day 12 · Super admin</a>
+<a href="day-13.html">Day 13 · Tenant dashboard</a>
+<a href="day-14.html">Day 14 · Go live</a>
+</aside>
+<main>
+<h1>Day 10 — Wallet &amp; Razorpay top-up</h1>
+<p><strong>Goal:</strong> <code>/topup 500</code> → Razorpay payment link → user pays (UPI/card) → webhook credits the wallet → Telegram confirms.</p>
+<h2>Flow</h2>
+<div class="code"><div class="file"><span>flow</span><button class="copy">Copy</button></div><pre><code>/topup 500 ─▶ Payment row (CREATED) ─▶ Razorpay Payment Link ─▶ &quot;💳 Pay ₹500&quot; button
+User pays ─▶ Razorpay POST /webhooks/razorpay (payment_link.paid)
+           ─▶ verify signature ─▶ Payment PAID + wallet += 500 (one DB transaction) ─▶ Telegram &quot;✅ ₹500 added&quot;</code></pre></div>
+<h2>Rules</h2>
+<ul>
+<li><strong>Verify the signature</strong> (HMAC-SHA256 of the <strong>raw</strong> body). Never credit an unsigned request.</li>
+<li><strong>Idempotent:</strong> Razorpay may send the same webhook twice. Only flip <code>CREATED → PAID</code> once.</li>
+<li>Amounts to Razorpay are in <strong>paise</strong> (<code>₹500 → 50000</code>).</li>
+</ul>
+<h2>Tasks</h2>
+<ul class="todo">
+<li><label><input type="checkbox" data-k="day-10-1"> <span>Create a Razorpay account → <strong>Test mode</strong> → API keys</span></label></li>
+<li><label><input type="checkbox" data-k="day-10-2"> <span>Add <code>RAZORPAY_KEY_ID</code>, <code>RAZORPAY_KEY_SECRET</code>, <code>RAZORPAY_WEBHOOK_SECRET</code> to <code>.env</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-10-3"> <span>Write <code>bot/topup.ts</code> and <code>routes/webhooks.ts</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-10-4"> <span>Expose your local API with a tunnel and register the webhook</span></label></li>
+</ul>
+<div class="code"><div class="file"><span>apps/api/src/bot/topup.ts</span><button class="copy">Copy</button></div><pre><code>import Razorpay from &quot;razorpay&quot;;
+import { InlineKeyboard } from &quot;grammy&quot;;
+import { prisma } from &quot;@ev/db&quot;;
+import { bot, getUser } from &quot;./bot&quot;;
+import { env } from &quot;../env&quot;;
+
+const rzp = new Razorpay({ key_id: env.RAZORPAY_KEY_ID!, key_secret: env.RAZORPAY_KEY_SECRET! });
+
+bot.command(&quot;topup&quot;, async (ctx) =&gt; {
+  const amount = Number(ctx.match) || 200;
+  if (amount &lt; 50 || amount &gt; 10_000) return ctx.reply(&quot;Use: /topup 500  (₹50 – ₹10,000)&quot;);
+
+  const user = await getUser(ctx);
+  const payment = await prisma.payment.create({ data: { userId: user.id, amount } });
+
+  const link = await rzp.paymentLink.create({
+    amount: amount * 100,
+    currency: &quot;INR&quot;,
+    description: &quot;EV wallet top-up&quot;,
+    reference_id: payment.id,
+    notes: { paymentId: payment.id },
+  });
+  await prisma.payment.update({ where: { id: payment.id }, data: { razorpayLinkId: link.id } });
+
+  await ctx.reply(`Top up ₹${amount}:`, { reply_markup: new InlineKeyboard().url(`💳 Pay ₹${amount}`, link.short_url) });
+});</code></pre></div>
+<div class="code"><div class="file"><span>apps/api/src/routes/webhooks.ts</span><button class="copy">Copy</button></div><pre><code>import express, { Router } from &quot;express&quot;;
+import { createHmac, timingSafeEqual } from &quot;node:crypto&quot;;
+import { prisma } from &quot;@ev/db&quot;;
+import { bot } from &quot;../bot/bot&quot;;
+import { env } from &quot;../env&quot;;
+
+export const webhooks = Router();
+
+webhooks.post(&quot;/razorpay&quot;, express.raw({ type: &quot;application/json&quot; }), async (req, res) =&gt; {
+  const signature = Buffer.from(req.header(&quot;x-razorpay-signature&quot;) ?? &quot;&quot;);
+  const expected = Buffer.from(createHmac(&quot;sha256&quot;, env.RAZORPAY_WEBHOOK_SECRET!).update(req.body).digest(&quot;hex&quot;));
+  if (signature.length !== expected.length || !timingSafeEqual(signature, expected)) {
+    return res.sendStatus(400);
+  }
+
+  const event = JSON.parse(req.body.toString());
+  if (event.event === &quot;payment_link.paid&quot;) {
+    const linkId: string = event.payload.payment_link.entity.id;
+
+    const paid = await prisma.$transaction(async (tx) =&gt; {
+      const flipped = await tx.payment.updateMany({
+        where: { razorpayLinkId: linkId, status: &quot;CREATED&quot; },
+        data: { status: &quot;PAID&quot;, paidAt: new Date() },
+      });
+      if (flipped.count === 0) return null; // duplicate webhook
+      const p = await tx.payment.findUniqueOrThrow({ where: { razorpayLinkId: linkId } });
+      return tx.user.update({
+        where: { id: p.userId },
+        data: { walletBalance: { increment: p.amount } },
+      }).then((user) =&gt; ({ user, amount: p.amount }));
+    });
+
+    if (paid) {
+      await bot.api.sendMessage(paid.user.telegramId,
+        `✅ ₹${paid.amount} added. Wallet balance: ₹${paid.user.walletBalance}`);
+    }
+  }
+  res.sendStatus(200);
+});</code></pre></div>
+<div class="warn">Mount webhooks <strong>before</strong> <code>app.use(express.json())</code>. If JSON parsing runs first, the raw body is gone and every signature check fails.</div>
+<div class="code"><div class="file"><span>apps/api/src/index.ts — add</span><button class="copy">Copy</button></div><pre><code>import &quot;./bot/topup&quot;;
+import { webhooks } from &quot;./routes/webhooks&quot;;
+
+app.use(&quot;/webhooks&quot;, webhooks);   // first
+app.use(express.json());          // after</code></pre></div>
+<div class="note">In private chats, the Telegram chat id equals the user's <code>telegramId</code>, so we can message them directly.</div>
+<h2>Local webhook testing</h2>
+<div class="code"><div class="file"><span>terminal</span><button class="copy">Copy</button></div><pre><code>cloudflared tunnel --url http://localhost:4000   # or: ngrok http 4000</code></pre></div>
+<p>Razorpay Dashboard → Webhooks → URL <code>https://&lt;tunnel&gt;/webhooks/razorpay</code>, secret = your <code>RAZORPAY_WEBHOOK_SECRET</code>, event <strong>payment_link.paid</strong>.</p>
+<h2>Done when</h2>
+<ul class="todo">
+<li><label><input type="checkbox" data-k="day-10-5"> <span><code>/topup 100</code> → test payment succeeds → wallet +₹100 → Telegram message</span></label></li>
+<li><label><input type="checkbox" data-k="day-10-6"> <span>Re-sending the same webhook from the Razorpay dashboard does <strong>not</strong> credit twice</span></label></li>
+<li><label><input type="checkbox" data-k="day-10-7"> <span>A request with a wrong signature gets <code>400</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-10-8"> <span>A Public session now works end-to-end and the wallet goes down after stop</span></label></li>
+</ul>
+<nav class="pn"><a href="day-09.html">← Day 9 · QR flow</a><a href="day-11.html">Day 11 · Auth →</a></nav>
+</main>
+</div>
+<script>
+document.querySelectorAll('.copy').forEach(b=>b.onclick=()=>{navigator.clipboard.writeText(b.closest('.code').querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)});
+document.querySelectorAll('input[data-k]').forEach(c=>{try{c.checked=localStorage.getItem(c.dataset.k)==='1'}catch(e){}c.onchange=()=>{try{localStorage.setItem(c.dataset.k,c.checked?'1':'0')}catch(e){}}});
+</script>
+</body>
+</html>

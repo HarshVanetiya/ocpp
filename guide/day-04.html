@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 4 — Access &amp; tariff engine</title>
+<style>
+:root{--bg:#fbfaf8;--panel:#fff;--ink:#1d1d1f;--mute:#6b6b70;--line:#e6e3dd;--accent:#0a7c5a;--accent-soft:#e3f3ec;--warn:#9a4b00;--warn-soft:#fdf0e1;--code-bg:#f4f2ee;--code-ink:#24292f}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--accent:#3fcf9a;--accent-soft:#16302a;--warn:#f3a35c;--warn-soft:#33251a;--code-bg:#202024;--code-ink:#e6e6e6}}
+:root[data-theme="dark"]{--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--accent:#3fcf9a;--accent-soft:#16302a;--warn:#f3a35c;--warn-soft:#33251a;--code-bg:#202024;--code-ink:#e6e6e6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{display:grid;grid-template-columns:220px minmax(0,1fr);max-width:1100px;margin:0 auto;gap:40px;padding:32px 16px}
+aside{position:sticky;top:24px;align-self:start;display:flex;flex-direction:column;gap:2px;font-size:14px}
+aside a{color:var(--mute);text-decoration:none;padding:5px 10px;border-radius:6px}
+aside a:hover{color:var(--ink);background:var(--code-bg)}
+aside a.on{color:var(--accent);background:var(--accent-soft);font-weight:600}
+main{min-width:0;max-width:760px}
+h1{font-size:30px;line-height:1.2;margin:0 0 8px;letter-spacing:-.01em}
+h2{font-size:21px;margin:36px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
+h3{font-size:17px;margin:24px 0 6px}
+a{color:var(--accent)}
+code{font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+.code{margin:12px 0 18px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--code-bg)}
+.file{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;border-bottom:1px solid var(--line);font:12.5px ui-monospace,Menlo,Consolas,monospace;color:var(--mute);background:var(--panel)}
+.copy{font:12px system-ui,sans-serif;border:1px solid var(--line);background:transparent;color:var(--mute);border-radius:5px;padding:2px 8px;cursor:pointer}
+.copy:hover{color:var(--ink)}
+pre{margin:0;padding:14px 16px;overflow-x:auto}
+pre code{background:none;padding:0;color:var(--code-ink);white-space:pre}
+.note,.warn{padding:10px 14px;border-radius:8px;margin:14px 0;border-left:3px solid var(--accent);background:var(--accent-soft)}
+.warn{border-color:var(--warn);background:var(--warn-soft)}
+ul.todo{list-style:none;padding-left:0}
+ul.todo li{padding:3px 0}
+ul.todo input{accent-color:var(--accent);margin-right:6px;transform:translateY(1px)}
+ul.todo input:checked+span{color:var(--mute);text-decoration:line-through}
+.pn{display:flex;justify-content:space-between;margin:48px 0 16px;padding-top:16px;border-top:1px solid var(--line)}
+.pn a{text-decoration:none;font-weight:600}
+@media (max-width:820px){.wrap{grid-template-columns:1fr;gap:16px}aside{position:static;flex-direction:row;overflow-x:auto;white-space:nowrap;padding-bottom:6px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<aside>
+<a href="index.html">Start here</a>
+<a href="day-01.html">Day 1 · Setup</a>
+<a href="day-02.html">Day 2 · Schema</a>
+<a href="day-03.html">Day 3 · Isolation</a>
+<a href="day-04.html" class=on>Day 4 · Access engine</a>
+<a href="day-05.html">Day 5 · OCPP gateway</a>
+<a href="day-06.html">Day 6 · Handlers</a>
+<a href="day-07.html">Day 7 · Sessions</a>
+<a href="day-08.html">Day 8 · Bot onboarding</a>
+<a href="day-09.html">Day 9 · QR flow</a>
+<a href="day-10.html">Day 10 · Wallet</a>
+<a href="day-11.html">Day 11 · Auth</a>
+<a href="day-12.html">Day 12 · Super admin</a>
+<a href="day-13.html">Day 13 · Tenant dashboard</a>
+<a href="day-14.html">Day 14 · Go live</a>
+</aside>
+<main>
+<h1>Day 4 — Access &amp; tariff engine</h1>
+<p><strong>Goal:</strong> given <code>(userId, ocppId, connectorNo)</code> decide: allowed or not, which mode, which price.</p>
+<h2>Split it in two</h2>
+<ul>
+<li><code>decideAccess(input)</code> — <strong>pure function</strong>, no database. Easy to unit test.</li>
+<li><code>checkAccess(userId, ocppId, connectorNo)</code> — loads data from Prisma, then calls <code>decideAccess</code>.</li>
+</ul>
+<h2>The waterfall</h2>
+<ol>
+<li>Charger exists, is online, connector is <code>Available</code> or <code>Preparing</code>. User has no other running session.</li>
+<li><strong>Case A:</strong> user has an active membership in the charger's tenant <strong>and</strong> that role is in <code>allowedModes</code> <strong>and</strong> a tariff rule exists → use it.</li>
+<li><strong>Case B:</strong> else, if <code>PUBLIC</code> is in <code>allowedModes</code> → public tariff.</li>
+<li>Else → <code>⛔ This charger is restricted to authorized Fleet/Society members only.</code></li>
+<li>Any mode with price &gt; 0 → wallet must be ≥ <code>MIN_WALLET_BALANCE</code>.</li>
+</ol>
+<h2>Tasks</h2>
+<ul class="todo">
+<li><label><input type="checkbox" data-k="day-04-1"> <span>Write <code>env.ts</code> (validated config)</span></label></li>
+<li><label><input type="checkbox" data-k="day-04-2"> <span>Write <code>services/access.ts</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-04-3"> <span>Write unit tests for every branch</span></label></li>
+</ul>
+<div class="code"><div class="file"><span>apps/api/src/env.ts</span><button class="copy">Copy</button></div><pre><code>import { z } from &quot;zod&quot;;
+
+export const env = z.object({
+  PORT: z.coerce.number().default(4000),
+  MIN_WALLET_BALANCE: z.coerce.number().default(100),
+  TELEGRAM_BOT_TOKEN: z.string().optional(),   // required from Day 8
+  BOT_USERNAME: z.string().optional(),
+  PUBLIC_URL: z.string().optional(),           // https URL for webhooks
+  JWT_SECRET: z.string().default(&quot;dev-secret-change-me&quot;),
+  RAZORPAY_KEY_ID: z.string().optional(),
+  RAZORPAY_KEY_SECRET: z.string().optional(),
+  RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+}).parse(process.env);</code></pre></div>
+<p>Create <code>apps/api/.env</code> (copy <code>DATABASE_URL</code> from <code>packages/db/.env</code>, Prisma reads it directly). Change the dev script to <code>tsx watch --env-file=.env src/index.ts</code>.</p>
+<div class="code"><div class="file"><span>apps/api/src/services/access.ts</span><button class="copy">Copy</button></div><pre><code>import { prisma, Prisma, type AccessMode } from &quot;@ev/db&quot;;
+import { env } from &quot;../env&quot;;
+
+export type AccessResult =
+  | { allowed: true; mode: AccessMode; pricePerKwh: Prisma.Decimal }
+  | { allowed: false; reason: string };
+
+export type AccessInput = {
+  online: boolean;
+  connectorStatus: string;
+  hasRunningSession: boolean;
+  allowedModes: AccessMode[];
+  tariffs: { mode: AccessMode; pricePerKwh: Prisma.Decimal }[];
+  memberRole: AccessMode | null; // active membership in THIS charger&#x27;s tenant
+  walletBalance: Prisma.Decimal;
+  minBalance: number;
+};
+
+const deny = (reason: string): AccessResult =&gt; ({ allowed: false, reason });
+
+export function decideAccess(i: AccessInput): AccessResult {
+  if (!i.online) return deny(&quot;📴 This charger is offline right now.&quot;);
+  if (![&quot;Available&quot;, &quot;Preparing&quot;].includes(i.connectorStatus))
+    return deny(`🔌 Connector is ${i.connectorStatus}. Try another one.`);
+  if (i.hasRunningSession) return deny(&quot;⚡ You already have a charging session running.&quot;);
+
+  const tariff = (m: AccessMode) =&gt; i.tariffs.find((t) =&gt; t.mode === m);
+  let pick: { mode: AccessMode; pricePerKwh: Prisma.Decimal } | undefined;
+
+  // Case A — member of this tenant with an allowed role
+  if (i.memberRole &amp;&amp; i.allowedModes.includes(i.memberRole)) pick = tariff(i.memberRole);
+
+  // Case B — fall back to public
+  if (!pick &amp;&amp; i.allowedModes.includes(&quot;PUBLIC&quot;)) {
+    pick = tariff(&quot;PUBLIC&quot;);
+    if (!pick) return deny(&quot;⚙️ Charger is not configured yet. Contact the operator.&quot;);
+  }
+
+  if (!pick) return deny(&quot;⛔ This charger is restricted to authorized Fleet/Society members only.&quot;);
+
+  if (pick.pricePerKwh.gt(0) &amp;&amp; i.walletBalance.lt(i.minBalance))
+    return deny(`💰 You need at least ₹${i.minBalance} in your wallet. Use /topup.`);
+
+  return { allowed: true, ...pick };
+}
+
+export async function checkAccess(userId: string, ocppId: string, connectorNo: number) {
+  const cp = await prisma.chargePoint.findUnique({
+    where: { ocppId },
+    include: { tariffRules: true, connectors: { where: { connectorId: connectorNo } } },
+  });
+  const connector = cp?.connectors[0];
+  if (!cp || !connector) return { result: deny(&quot;❓ Unknown charger or connector.&quot;) };
+
+  const user = await prisma.user.findUniqueOrThrow({
+    where: { id: userId },
+    include: { memberships: { where: { tenantId: cp.tenantId, isActive: true } } },
+  });
+  const running = await prisma.chargingSession.count({
+    where: { userId, status: { in: [&quot;PENDING&quot;, &quot;ACTIVE&quot;] } },
+  });
+
+  const result = decideAccess({
+    online: cp.isOnline,
+    connectorStatus: connector.status,
+    hasRunningSession: running &gt; 0,
+    allowedModes: cp.allowedModes,
+    tariffs: cp.tariffRules,
+    memberRole: user.memberships[0]?.role ?? null,
+    walletBalance: user.walletBalance,
+    minBalance: env.MIN_WALLET_BALANCE,
+  });
+  return { result, chargePoint: cp, connector, user };
+}</code></pre></div>
+<h2>Tests</h2>
+<div class="code"><div class="file"><span>apps/api/src/services/access.test.ts</span><button class="copy">Copy</button></div><pre><code>import { describe, it, expect } from &quot;vitest&quot;;
+import { Prisma } from &quot;@ev/db&quot;;
+import { decideAccess, type AccessInput } from &quot;./access&quot;;
+
+const D = (n: number) =&gt; new Prisma.Decimal(n);
+const base: AccessInput = {
+  online: true, connectorStatus: &quot;Available&quot;, hasRunningSession: false,
+  allowedModes: [&quot;FLEET&quot;, &quot;PUBLIC&quot;],
+  tariffs: [{ mode: &quot;FLEET&quot;, pricePerKwh: D(0) }, { mode: &quot;PUBLIC&quot;, pricePerKwh: D(18) }],
+  memberRole: null, walletBalance: D(0), minBalance: 100,
+};
+
+describe(&quot;decideAccess&quot;, () =&gt; {
+  it(&quot;fleet member charges free&quot;, () =&gt; {
+    const r = decideAccess({ ...base, memberRole: &quot;FLEET&quot; });
+    expect(r).toMatchObject({ allowed: true, mode: &quot;FLEET&quot; });
+  });
+  it(&quot;stranger becomes PUBLIC&quot;, () =&gt; {
+    const r = decideAccess({ ...base, walletBalance: D(500) });
+    expect(r).toMatchObject({ allowed: true, mode: &quot;PUBLIC&quot; });
+  });
+  it(&quot;public with low wallet is denied&quot;, () =&gt; {
+    expect(decideAccess(base).allowed).toBe(false);
+  });
+  it(&quot;member with disallowed role falls back to PUBLIC&quot;, () =&gt; {
+    const r = decideAccess({ ...base, memberRole: &quot;PRIVATE_MEMBER&quot;, walletBalance: D(500) });
+    expect(r).toMatchObject({ allowed: true, mode: &quot;PUBLIC&quot; });
+  });
+  it(&quot;fleet-only charger rejects strangers&quot;, () =&gt; {
+    const r = decideAccess({ ...base, allowedModes: [&quot;FLEET&quot;] });
+    expect(r.allowed).toBe(false);
+  });
+  it(&quot;offline charger is denied&quot;, () =&gt; {
+    expect(decideAccess({ ...base, memberRole: &quot;FLEET&quot;, online: false }).allowed).toBe(false);
+  });
+});</code></pre></div>
+<div class="code"><div class="file"><span>terminal</span><button class="copy">Copy</button></div><pre><code>pnpm --filter @ev/api test</code></pre></div>
+<h2>Done when</h2>
+<ul class="todo">
+<li><label><input type="checkbox" data-k="day-04-4"> <span>All tests green</span></label></li>
+<li><label><input type="checkbox" data-k="day-04-5"> <span>You can explain every branch of the waterfall without looking</span></label></li>
+</ul>
+<nav class="pn"><a href="day-03.html">← Day 3 · Isolation</a><a href="day-05.html">Day 5 · OCPP gateway →</a></nav>
+</main>
+</div>
+<script>
+document.querySelectorAll('.copy').forEach(b=>b.onclick=()=>{navigator.clipboard.writeText(b.closest('.code').querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)});
+document.querySelectorAll('input[data-k]').forEach(c=>{try{c.checked=localStorage.getItem(c.dataset.k)==='1'}catch(e){}c.onchange=()=>{try{localStorage.setItem(c.dataset.k,c.checked?'1':'0')}catch(e){}}});
+</script>
+</body>
+</html>

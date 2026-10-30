@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 5 — Express + OCPP WebSocket</title>
+<style>
+:root{--bg:#fbfaf8;--panel:#fff;--ink:#1d1d1f;--mute:#6b6b70;--line:#e6e3dd;--accent:#0a7c5a;--accent-soft:#e3f3ec;--warn:#9a4b00;--warn-soft:#fdf0e1;--code-bg:#f4f2ee;--code-ink:#24292f}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--accent:#3fcf9a;--accent-soft:#16302a;--warn:#f3a35c;--warn-soft:#33251a;--code-bg:#202024;--code-ink:#e6e6e6}}
+:root[data-theme="dark"]{--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--accent:#3fcf9a;--accent-soft:#16302a;--warn:#f3a35c;--warn-soft:#33251a;--code-bg:#202024;--code-ink:#e6e6e6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{display:grid;grid-template-columns:220px minmax(0,1fr);max-width:1100px;margin:0 auto;gap:40px;padding:32px 16px}
+aside{position:sticky;top:24px;align-self:start;display:flex;flex-direction:column;gap:2px;font-size:14px}
+aside a{color:var(--mute);text-decoration:none;padding:5px 10px;border-radius:6px}
+aside a:hover{color:var(--ink);background:var(--code-bg)}
+aside a.on{color:var(--accent);background:var(--accent-soft);font-weight:600}
+main{min-width:0;max-width:760px}
+h1{font-size:30px;line-height:1.2;margin:0 0 8px;letter-spacing:-.01em}
+h2{font-size:21px;margin:36px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
+h3{font-size:17px;margin:24px 0 6px}
+a{color:var(--accent)}
+code{font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+.code{margin:12px 0 18px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--code-bg)}
+.file{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;border-bottom:1px solid var(--line);font:12.5px ui-monospace,Menlo,Consolas,monospace;color:var(--mute);background:var(--panel)}
+.copy{font:12px system-ui,sans-serif;border:1px solid var(--line);background:transparent;color:var(--mute);border-radius:5px;padding:2px 8px;cursor:pointer}
+.copy:hover{color:var(--ink)}
+pre{margin:0;padding:14px 16px;overflow-x:auto}
+pre code{background:none;padding:0;color:var(--code-ink);white-space:pre}
+.note,.warn{padding:10px 14px;border-radius:8px;margin:14px 0;border-left:3px solid var(--accent);background:var(--accent-soft)}
+.warn{border-color:var(--warn);background:var(--warn-soft)}
+ul.todo{list-style:none;padding-left:0}
+ul.todo li{padding:3px 0}
+ul.todo input{accent-color:var(--accent);margin-right:6px;transform:translateY(1px)}
+ul.todo input:checked+span{color:var(--mute);text-decoration:line-through}
+.pn{display:flex;justify-content:space-between;margin:48px 0 16px;padding-top:16px;border-top:1px solid var(--line)}
+.pn a{text-decoration:none;font-weight:600}
+@media (max-width:820px){.wrap{grid-template-columns:1fr;gap:16px}aside{position:static;flex-direction:row;overflow-x:auto;white-space:nowrap;padding-bottom:6px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<aside>
+<a href="index.html">Start here</a>
+<a href="day-01.html">Day 1 · Setup</a>
+<a href="day-02.html">Day 2 · Schema</a>
+<a href="day-03.html">Day 3 · Isolation</a>
+<a href="day-04.html">Day 4 · Access engine</a>
+<a href="day-05.html" class=on>Day 5 · OCPP gateway</a>
+<a href="day-06.html">Day 6 · Handlers</a>
+<a href="day-07.html">Day 7 · Sessions</a>
+<a href="day-08.html">Day 8 · Bot onboarding</a>
+<a href="day-09.html">Day 9 · QR flow</a>
+<a href="day-10.html">Day 10 · Wallet</a>
+<a href="day-11.html">Day 11 · Auth</a>
+<a href="day-12.html">Day 12 · Super admin</a>
+<a href="day-13.html">Day 13 · Tenant dashboard</a>
+<a href="day-14.html">Day 14 · Go live</a>
+</aside>
+<main>
+<h1>Day 5 — Express + OCPP WebSocket</h1>
+<p><strong>Goal:</strong> chargers connect to <code>ws://localhost:4000/ocpp/:ocppId</code>, we keep their sockets in a <code>Map</code>, and we can both <strong>answer</strong> and <strong>send</strong> OCPP calls.</p>
+<h2>OCPP 1.6J in 60 seconds</h2>
+<p>Every message is a JSON array. Only three shapes exist:</p>
+<div class="code"><div class="file"><span>message types</span><button class="copy">Copy</button></div><pre><code>CALL        [2, &quot;&lt;uniqueId&gt;&quot;, &quot;&lt;Action&gt;&quot;, {payload}]     ← request (either side)
+CALLRESULT  [3, &quot;&lt;uniqueId&gt;&quot;, {payload}]                 ← success reply
+CALLERROR   [4, &quot;&lt;uniqueId&gt;&quot;, &quot;&lt;ErrorCode&gt;&quot;, &quot;&lt;description&gt;&quot;, {}]</code></pre></div>
+<ul>
+<li>Charger → us: <code>BootNotification</code>, <code>Heartbeat</code>, <code>StatusNotification</code>, <code>Authorize</code>, <code>StartTransaction</code>, <code>MeterValues</code>, <code>StopTransaction</code></li>
+<li>Us → charger: <code>RemoteStartTransaction</code>, <code>RemoteStopTransaction</code></li>
+<li>The WebSocket <strong>subprotocol must be <code>ocpp1.6</code></strong>, or real chargers will disconnect.</li>
+<li>Reply to a CALL with the <strong>same uniqueId</strong>.</li>
+</ul>
+<h2>Tasks</h2>
+<ul class="todo">
+<li><label><input type="checkbox" data-k="day-05-1"> <span>Write the internal event bus</span></label></li>
+<li><label><input type="checkbox" data-k="day-05-2"> <span>Write the gateway (<code>attachOcpp</code>, <code>call</code>)</span></label></li>
+<li><label><input type="checkbox" data-k="day-05-3"> <span>Wire it into <code>index.ts</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-05-4"> <span>Write the simulator and see <code>BootNotification</code> arrive</span></label></li>
+</ul>
+<div class="code"><div class="file"><span>apps/api/src/events.ts</span><button class="copy">Copy</button></div><pre><code>import { EventEmitter } from &quot;node:events&quot;;
+import type { ChargingSession } from &quot;@ev/db&quot;;
+
+// OCPP layer emits, Telegram layer listens. They never import each other.
+type Events = {
+  &quot;session:started&quot;: [ChargingSession];
+  &quot;session:meter&quot;: [ChargingSession];
+  &quot;session:stopped&quot;: [ChargingSession];
+  &quot;session:failed&quot;: [ChargingSession, string];
+};
+export const events = new EventEmitter&lt;Events&gt;();</code></pre></div>
+<div class="code"><div class="file"><span>apps/api/src/ocpp/gateway.ts</span><button class="copy">Copy</button></div><pre><code>import { WebSocketServer, WebSocket } from &quot;ws&quot;;
+import type { Server } from &quot;node:http&quot;;
+import { randomUUID } from &quot;node:crypto&quot;;
+import { prisma } from &quot;@ev/db&quot;;
+import { handlers } from &quot;./handlers&quot;;
+
+export const sockets = new Map&lt;string, WebSocket&gt;();
+const pending = new Map&lt;string, { resolve: (p: any) =&gt; void; reject: (e: Error) =&gt; void; timer: NodeJS.Timeout }&gt;();
+
+export function attachOcpp(server: Server) {
+  const wss = new WebSocketServer({
+    noServer: true,
+    handleProtocols: (protocols) =&gt; (protocols.has(&quot;ocpp1.6&quot;) ? &quot;ocpp1.6&quot; : false),
+  });
+
+  server.on(&quot;upgrade&quot;, async (req, socket, head) =&gt; {
+    const m = req.url?.match(/^\/ocpp\/([^/?]+)/);
+    const ocppId = m &amp;&amp; decodeURIComponent(m[1]);
+    const known = ocppId &amp;&amp; (await prisma.chargePoint.findUnique({ where: { ocppId } }));
+    if (!known) {
+      socket.write(&quot;HTTP/1.1 404 Not Found\r\n\r\n&quot;);
+      return socket.destroy();
+    }
+    wss.handleUpgrade(req, socket, head, (ws) =&gt; onConnect(ws, ocppId));
+  });
+}
+
+function onConnect(ws: WebSocket, ocppId: string) {
+  sockets.get(ocppId)?.terminate(); // charger reconnected → drop the stale socket
+  sockets.set(ocppId, ws);
+  console.log(`[ocpp] ${ocppId} connected`);
+
+  ws.on(&quot;message&quot;, async (raw) =&gt; {
+    let msg: any[];
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
+    const [type, id] = msg;
+
+    if (type === 2) {
+      const [, , action, payload] = msg;
+      console.log(`[ocpp] ${ocppId} → ${action}`, payload);
+      const handler = handlers[action];
+      if (!handler) return ws.send(JSON.stringify([4, id, &quot;NotImplemented&quot;, action, {}]));
+      try {
+        ws.send(JSON.stringify([3, id, await handler(ocppId, payload)]));
+      } catch (err) {
+        console.error(err);
+        ws.send(JSON.stringify([4, id, &quot;InternalError&quot;, String(err), {}]));
+      }
+      return;
+    }
+
+    // Reply to a call WE made
+    const p = pending.get(id);
+    if (!p) return;
+    clearTimeout(p.timer);
+    pending.delete(id);
+    if (type === 3) p.resolve(msg[2]);
+    else p.reject(new Error(`${msg[2]}: ${msg[3]}`));
+  });
+
+  ws.on(&quot;close&quot;, async () =&gt; {
+    if (sockets.get(ocppId) !== ws) return; // already replaced
+    sockets.delete(ocppId);
+    await prisma.chargePoint.update({ where: { ocppId }, data: { isOnline: false } });
+    console.log(`[ocpp] ${ocppId} disconnected`);
+  });
+}
+
+// Send a CALL to a charger and wait for its reply.
+export function call&lt;T = any&gt;(ocppId: string, action: string, payload: object, timeoutMs = 30_000): Promise&lt;T&gt; {
+  const ws = sockets.get(ocppId);
+  if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error(&quot;Charger is offline&quot;));
+  const id = randomUUID();
+  return new Promise((resolve, reject) =&gt; {
+    const timer = setTimeout(() =&gt; { pending.delete(id); reject(new Error(`${action} timed out`)); }, timeoutMs);
+    pending.set(id, { resolve, reject, timer });
+    ws.send(JSON.stringify([2, id, action, payload]));
+  });
+}</code></pre></div>
+<p>A placeholder so it compiles today (you fill it tomorrow):</p>
+<div class="code"><div class="file"><span>apps/api/src/ocpp/handlers.ts</span><button class="copy">Copy</button></div><pre><code>type Handler = (ocppId: string, payload: any) =&gt; Promise&lt;object&gt;;
+
+export const handlers: Record&lt;string, Handler&gt; = {
+  BootNotification: async () =&gt; ({ status: &quot;Accepted&quot;, currentTime: new Date().toISOString(), interval: 60 }),
+  Heartbeat: async () =&gt; ({ currentTime: new Date().toISOString() }),
+};</code></pre></div>
+<div class="code"><div class="file"><span>apps/api/src/index.ts — replace</span><button class="copy">Copy</button></div><pre><code>import express from &quot;express&quot;;
+import { createServer } from &quot;node:http&quot;;
+import { env } from &quot;./env&quot;;
+import { attachOcpp } from &quot;./ocpp/gateway&quot;;
+
+const app = express();
+app.get(&quot;/health&quot;, (_req, res) =&gt; { res.json({ ok: true }); });
+
+const server = createServer(app);
+attachOcpp(server);
+server.listen(env.PORT, () =&gt; console.log(`API + OCPP on :${env.PORT}`));</code></pre></div>
+<h2>The fake charger</h2>
+<p>You'll use this all week instead of hardware. Today it only boots; on Day 7 it starts/stops sessions.</p>
+<div class="code"><div class="file"><span>apps/api/scripts/sim.ts</span><button class="copy">Copy</button></div><pre><code>import WebSocket from &quot;ws&quot;;
+
+const ID = process.argv[2] ?? &quot;CP_TEST01&quot;;
+const ws = new WebSocket(`ws://localhost:4000/ocpp/${ID}`, &quot;ocpp1.6&quot;);
+const waiting = new Map&lt;string, (p: any) =&gt; void&gt;();
+let seq = 0, meter = 10_000, tx: number | null = null;
+let timer: NodeJS.Timeout | undefined;
+
+const call = (action: string, payload: object) =&gt;
+  new Promise&lt;any&gt;((res) =&gt; {
+    const id = String(++seq);
+    waiting.set(id, res);
+    ws.send(JSON.stringify([2, id, action, payload]));
+  });
+const status = (connectorId: number, status: string) =&gt;
+  call(&quot;StatusNotification&quot;, { connectorId, errorCode: &quot;NoError&quot;, status });
+const now = () =&gt; new Date().toISOString();
+
+ws.on(&quot;open&quot;, async () =&gt; {
+  console.log(&quot;Boot:&quot;, await call(&quot;BootNotification&quot;, { chargePointVendor: &quot;Sim&quot;, chargePointModel: &quot;v1&quot; }));
+  await status(1, &quot;Available&quot;);
+  await status(2, &quot;Available&quot;);
+  setInterval(() =&gt; call(&quot;Heartbeat&quot;, {}), 60_000);
+});
+
+ws.on(&quot;message&quot;, async (raw) =&gt; {
+  const msg = JSON.parse(raw.toString());
+  if (msg[0] === 3 || msg[0] === 4) { waiting.get(msg[1])?.(msg[2]); waiting.delete(msg[1]); return; }
+  if (msg[0] !== 2) return;
+  const [, id, action, p] = msg;
+  console.log(&quot;&lt;&lt;&quot;, action, p);
+
+  if (action === &quot;RemoteStartTransaction&quot;) {
+    ws.send(JSON.stringify([3, id, { status: &quot;Accepted&quot; }]));
+    await status(p.connectorId, &quot;Preparing&quot;);
+    const res = await call(&quot;StartTransaction&quot;, { connectorId: p.connectorId, idTag: p.idTag, meterStart: meter, timestamp: now() });
+    if (res?.idTagInfo?.status !== &quot;Accepted&quot;) return status(p.connectorId, &quot;Available&quot;);
+    tx = res.transactionId;
+    await status(p.connectorId, &quot;Charging&quot;);
+    timer = setInterval(() =&gt; {
+      meter += 300; // +0.3 kWh every 5 s
+      call(&quot;MeterValues&quot;, {
+        connectorId: p.connectorId, transactionId: tx,
+        meterValue: [{ timestamp: now(), sampledValue: [{ value: String(meter), measurand: &quot;Energy.Active.Import.Register&quot;, unit: &quot;Wh&quot; }] }],
+      });
+    }, 5_000);
+  } else if (action === &quot;RemoteStopTransaction&quot;) {
+    ws.send(JSON.stringify([3, id, { status: &quot;Accepted&quot; }]));
+    clearInterval(timer);
+    await call(&quot;StopTransaction&quot;, { transactionId: tx, meterStop: meter, timestamp: now(), reason: &quot;Remote&quot; });
+    await status(1, &quot;Available&quot;);
+  } else {
+    ws.send(JSON.stringify([4, id, &quot;NotImplemented&quot;, &quot;&quot;, {}]));
+  }
+});</code></pre></div>
+<div class="code"><div class="file"><span>terminal (second tab)</span><button class="copy">Copy</button></div><pre><code>pnpm --filter @ev/api sim CP_TEST01</code></pre></div>
+<div class="note">Want a GUI simulator later? Any OCPP 1.6J simulator works — point it at <code>ws://localhost:4000/ocpp/CP_TEST01</code> with subprotocol <code>ocpp1.6</code>.</div>
+<h2>Done when</h2>
+<ul class="todo">
+<li><label><input type="checkbox" data-k="day-05-5"> <span>API logs <code>CP_TEST01 connected</code> and <code>→ BootNotification</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-05-6"> <span>Simulator prints <code>Boot: { status: &#x27;Accepted&#x27;, ... }</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-05-7"> <span><code>sim UNKNOWN_ID</code> is rejected with 404</span></label></li>
+<li><label><input type="checkbox" data-k="day-05-8"> <span>Killing the simulator logs <code>disconnected</code></span></label></li>
+</ul>
+<nav class="pn"><a href="day-04.html">← Day 4 · Access engine</a><a href="day-06.html">Day 6 · Handlers →</a></nav>
+</main>
+</div>
+<script>
+document.querySelectorAll('.copy').forEach(b=>b.onclick=()=>{navigator.clipboard.writeText(b.closest('.code').querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)});
+document.querySelectorAll('input[data-k]').forEach(c=>{try{c.checked=localStorage.getItem(c.dataset.k)==='1'}catch(e){}c.onchange=()=>{try{localStorage.setItem(c.dataset.k,c.checked?'1':'0')}catch(e){}}});
+</script>
+</body>
+</html>

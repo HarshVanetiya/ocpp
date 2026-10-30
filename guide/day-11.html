@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 11 — Dashboard auth</title>
+<style>
+:root{--bg:#fbfaf8;--panel:#fff;--ink:#1d1d1f;--mute:#6b6b70;--line:#e6e3dd;--accent:#0a7c5a;--accent-soft:#e3f3ec;--warn:#9a4b00;--warn-soft:#fdf0e1;--code-bg:#f4f2ee;--code-ink:#24292f}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--accent:#3fcf9a;--accent-soft:#16302a;--warn:#f3a35c;--warn-soft:#33251a;--code-bg:#202024;--code-ink:#e6e6e6}}
+:root[data-theme="dark"]{--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--accent:#3fcf9a;--accent-soft:#16302a;--warn:#f3a35c;--warn-soft:#33251a;--code-bg:#202024;--code-ink:#e6e6e6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{display:grid;grid-template-columns:220px minmax(0,1fr);max-width:1100px;margin:0 auto;gap:40px;padding:32px 16px}
+aside{position:sticky;top:24px;align-self:start;display:flex;flex-direction:column;gap:2px;font-size:14px}
+aside a{color:var(--mute);text-decoration:none;padding:5px 10px;border-radius:6px}
+aside a:hover{color:var(--ink);background:var(--code-bg)}
+aside a.on{color:var(--accent);background:var(--accent-soft);font-weight:600}
+main{min-width:0;max-width:760px}
+h1{font-size:30px;line-height:1.2;margin:0 0 8px;letter-spacing:-.01em}
+h2{font-size:21px;margin:36px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
+h3{font-size:17px;margin:24px 0 6px}
+a{color:var(--accent)}
+code{font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+.code{margin:12px 0 18px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--code-bg)}
+.file{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;border-bottom:1px solid var(--line);font:12.5px ui-monospace,Menlo,Consolas,monospace;color:var(--mute);background:var(--panel)}
+.copy{font:12px system-ui,sans-serif;border:1px solid var(--line);background:transparent;color:var(--mute);border-radius:5px;padding:2px 8px;cursor:pointer}
+.copy:hover{color:var(--ink)}
+pre{margin:0;padding:14px 16px;overflow-x:auto}
+pre code{background:none;padding:0;color:var(--code-ink);white-space:pre}
+.note,.warn{padding:10px 14px;border-radius:8px;margin:14px 0;border-left:3px solid var(--accent);background:var(--accent-soft)}
+.warn{border-color:var(--warn);background:var(--warn-soft)}
+ul.todo{list-style:none;padding-left:0}
+ul.todo li{padding:3px 0}
+ul.todo input{accent-color:var(--accent);margin-right:6px;transform:translateY(1px)}
+ul.todo input:checked+span{color:var(--mute);text-decoration:line-through}
+.pn{display:flex;justify-content:space-between;margin:48px 0 16px;padding-top:16px;border-top:1px solid var(--line)}
+.pn a{text-decoration:none;font-weight:600}
+@media (max-width:820px){.wrap{grid-template-columns:1fr;gap:16px}aside{position:static;flex-direction:row;overflow-x:auto;white-space:nowrap;padding-bottom:6px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<aside>
+<a href="index.html">Start here</a>
+<a href="day-01.html">Day 1 · Setup</a>
+<a href="day-02.html">Day 2 · Schema</a>
+<a href="day-03.html">Day 3 · Isolation</a>
+<a href="day-04.html">Day 4 · Access engine</a>
+<a href="day-05.html">Day 5 · OCPP gateway</a>
+<a href="day-06.html">Day 6 · Handlers</a>
+<a href="day-07.html">Day 7 · Sessions</a>
+<a href="day-08.html">Day 8 · Bot onboarding</a>
+<a href="day-09.html">Day 9 · QR flow</a>
+<a href="day-10.html">Day 10 · Wallet</a>
+<a href="day-11.html" class=on>Day 11 · Auth</a>
+<a href="day-12.html">Day 12 · Super admin</a>
+<a href="day-13.html">Day 13 · Tenant dashboard</a>
+<a href="day-14.html">Day 14 · Go live</a>
+</aside>
+<main>
+<h1>Day 11 — Dashboard auth</h1>
+<p><strong>Goal:</strong> admins log in, get a JWT in an <strong>httpOnly cookie</strong>, and every API route knows <code>{ adminId, role, tenantId }</code>.</p>
+<h2>Design</h2>
+<ul>
+<li><strong>Express owns auth.</strong> It checks the password, signs the JWT and enforces roles.</li>
+<li><strong>Next.js proxies <code>/api/*</code> → Express.</strong> Same origin = cookies just work, no CORS.</li>
+<li><strong>Tenant routes get <code>req.db = tenantDb(tenantId)</code>.</strong> Isolation is automatic.</li>
+</ul>
+<h2>Tasks</h2>
+<ul class="todo">
+<li><label><input type="checkbox" data-k="day-11-1"> <span>Write <code>middleware/auth.ts</code> and <code>routes/auth.ts</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-11-2"> <span>Add the Next.js rewrite</span></label></li>
+<li><label><input type="checkbox" data-k="day-11-3"> <span>Build <code>/login</code> and a protected layout</span></label></li>
+</ul>
+<div class="code"><div class="file"><span>apps/api/src/middleware/auth.ts</span><button class="copy">Copy</button></div><pre><code>import type { RequestHandler } from &quot;express&quot;;
+import jwt from &quot;jsonwebtoken&quot;;
+import { tenantDb, type AdminRole, type TenantDb } from &quot;@ev/db&quot;;
+import { env } from &quot;../env&quot;;
+
+export type Claims = { adminId: string; role: AdminRole; tenantId: string | null };
+
+declare global {
+  namespace Express {
+    interface Request { auth: Claims; db: TenantDb }
+  }
+}
+
+export const requireRole = (...roles: AdminRole[]): RequestHandler =&gt; (req, res, next) =&gt; {
+  try {
+    const claims = jwt.verify(req.cookies?.token ?? &quot;&quot;, env.JWT_SECRET) as Claims;
+    if (!roles.includes(claims.role)) return void res.sendStatus(403);
+    req.auth = claims;
+    if (claims.role === &quot;TENANT_ADMIN&quot;) req.db = tenantDb(claims.tenantId!);
+    next();
+  } catch {
+    res.sendStatus(401);
+  }
+};</code></pre></div>
+<div class="code"><div class="file"><span>apps/api/src/routes/auth.ts</span><button class="copy">Copy</button></div><pre><code>import { Router } from &quot;express&quot;;
+import bcrypt from &quot;bcryptjs&quot;;
+import jwt from &quot;jsonwebtoken&quot;;
+import { z } from &quot;zod&quot;;
+import { prisma } from &quot;@ev/db&quot;;
+import { env } from &quot;../env&quot;;
+
+export const auth = Router();
+
+auth.post(&quot;/login&quot;, async (req, res) =&gt; {
+  const { email, password } = z.object({ email: z.string().email(), password: z.string() }).parse(req.body);
+  const admin = await prisma.adminUser.findUnique({ where: { email } });
+  if (!admin || !(await bcrypt.compare(password, admin.passwordHash))) return void res.sendStatus(401);
+
+  const claims = { adminId: admin.id, role: admin.role, tenantId: admin.tenantId };
+  const token = jwt.sign(claims, env.JWT_SECRET, { expiresIn: &quot;7d&quot; });
+  res.cookie(&quot;token&quot;, token, { httpOnly: true, sameSite: &quot;lax&quot;, secure: process.env.NODE_ENV === &quot;production&quot;, maxAge: 7 * 864e5 });
+  res.json(claims);
+});
+
+auth.post(&quot;/logout&quot;, (_req, res) =&gt; { res.clearCookie(&quot;token&quot;).sendStatus(204); });
+
+auth.get(&quot;/me&quot;, (req, res) =&gt; {
+  try { res.json(jwt.verify(req.cookies?.token ?? &quot;&quot;, env.JWT_SECRET)); }
+  catch { res.sendStatus(401); }
+});</code></pre></div>
+<div class="code"><div class="file"><span>apps/api/src/index.ts — add (after express.json())</span><button class="copy">Copy</button></div><pre><code>import cookieParser from &quot;cookie-parser&quot;;
+import { auth } from &quot;./routes/auth&quot;;
+
+app.use(cookieParser());
+app.use(&quot;/auth&quot;, auth);</code></pre></div>
+<h2>Next.js side</h2>
+<div class="code"><div class="file"><span>apps/web/next.config.ts</span><button class="copy">Copy</button></div><pre><code>import type { NextConfig } from &quot;next&quot;;
+
+const config: NextConfig = {
+  async rewrites() {
+    return [{ source: &quot;/api/:path*&quot;, destination: `${process.env.API_URL ?? &quot;http://localhost:4000&quot;}/:path*` }];
+  },
+};
+export default config;</code></pre></div>
+<div class="code"><div class="file"><span>apps/web/src/lib/api.ts</span><button class="copy">Copy</button></div><pre><code>export async function api&lt;T = any&gt;(path: string, init?: RequestInit): Promise&lt;T&gt; {
+  const res = await fetch(`/api${path}`, {
+    ...init,
+    headers: { &quot;Content-Type&quot;: &quot;application/json&quot;, ...init?.headers },
+  });
+  if (res.status === 401) { window.location.href = &quot;/login&quot;; throw new Error(&quot;Unauthorized&quot;); }
+  if (!res.ok) throw new Error(await res.text());
+  return res.status === 204 ? (undefined as T) : res.json();
+}</code></pre></div>
+<div class="code"><div class="file"><span>apps/web/src/app/login/page.tsx</span><button class="copy">Copy</button></div><pre><code>&quot;use client&quot;;
+import { useState } from &quot;react&quot;;
+import { api } from &quot;@/lib/api&quot;;
+
+export default function Login() {
+  const [error, setError] = useState(&quot;&quot;);
+
+  async function submit(form: FormData) {
+    try {
+      const me = await api(&quot;/auth/login&quot;, { method: &quot;POST&quot;, body: JSON.stringify(Object.fromEntries(form)) });
+      window.location.href = me.role === &quot;SUPER_ADMIN&quot; ? &quot;/admin/tenants&quot; : &quot;/dashboard/chargers&quot;;
+    } catch { setError(&quot;Wrong email or password&quot;); }
+  }
+
+  return (
+    &lt;form action={submit} className=&quot;mx-auto mt-24 flex max-w-sm flex-col gap-3&quot;&gt;
+      &lt;h1 className=&quot;text-2xl font-semibold&quot;&gt;Sign in&lt;/h1&gt;
+      &lt;input name=&quot;email&quot; type=&quot;email&quot; placeholder=&quot;Email&quot; className=&quot;rounded border p-2&quot; required /&gt;
+      &lt;input name=&quot;password&quot; type=&quot;password&quot; placeholder=&quot;Password&quot; className=&quot;rounded border p-2&quot; required /&gt;
+      &lt;button className=&quot;rounded bg-black p-2 text-white&quot;&gt;Login&lt;/button&gt;
+      {error &amp;&amp; &lt;p className=&quot;text-red-600&quot;&gt;{error}&lt;/p&gt;}
+    &lt;/form&gt;
+  );
+}</code></pre></div>
+<p>Protect each area with a client layout that checks <code>/auth/me</code>:</p>
+<div class="code"><div class="file"><span>apps/web/src/components/RequireRole.tsx</span><button class="copy">Copy</button></div><pre><code>&quot;use client&quot;;
+import { useEffect, useState, type ReactNode } from &quot;react&quot;;
+import { api } from &quot;@/lib/api&quot;;
+
+export function RequireRole({ role, children }: { role: &quot;SUPER_ADMIN&quot; | &quot;TENANT_ADMIN&quot;; children: ReactNode }) {
+  const [ok, setOk] = useState(false);
+  useEffect(() =&gt; {
+    api(&quot;/auth/me&quot;).then((me) =&gt; (me.role === role ? setOk(true) : (window.location.href = &quot;/login&quot;)));
+  }, [role]);
+  return ok ? &lt;&gt;{children}&lt;/&gt; : null;
+}</code></pre></div>
+<div class="code"><div class="file"><span>apps/web/src/app/admin/layout.tsx</span><button class="copy">Copy</button></div><pre><code>import { RequireRole } from &quot;@/components/RequireRole&quot;;
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return &lt;RequireRole role=&quot;SUPER_ADMIN&quot;&gt;&lt;main className=&quot;p-8&quot;&gt;{children}&lt;/main&gt;&lt;/RequireRole&gt;;
+}</code></pre></div>
+<p>Create <code>apps/web/src/app/dashboard/layout.tsx</code> the same way with <code>role=&quot;TENANT_ADMIN&quot;</code>.</p>
+<div class="warn">The frontend check is only for UX. <strong>Real security is <code>requireRole</code> on every Express route.</strong></div>
+<h2>Done when</h2>
+<ul class="todo">
+<li><label><input type="checkbox" data-k="day-11-4"> <span><code>super@ev.local</code> / <code>admin123</code> → lands on <code>/admin/tenants</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-11-5"> <span><code>admin@tata.local</code> → lands on <code>/dashboard/chargers</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-11-6"> <span>Tenant admin opening <code>/admin/tenants</code> is sent back to login</span></label></li>
+</ul>
+<nav class="pn"><a href="day-10.html">← Day 10 · Wallet</a><a href="day-12.html">Day 12 · Super admin →</a></nav>
+</main>
+</div>
+<script>
+document.querySelectorAll('.copy').forEach(b=>b.onclick=()=>{navigator.clipboard.writeText(b.closest('.code').querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)});
+document.querySelectorAll('input[data-k]').forEach(c=>{try{c.checked=localStorage.getItem(c.dataset.k)==='1'}catch(e){}c.onchange=()=>{try{localStorage.setItem(c.dataset.k,c.checked?'1':'0')}catch(e){}}});
+</script>
+</body>
+</html>

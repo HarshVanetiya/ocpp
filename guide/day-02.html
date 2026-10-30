@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 2 — Database schema &amp; seed</title>
+<style>
+:root{--bg:#fbfaf8;--panel:#fff;--ink:#1d1d1f;--mute:#6b6b70;--line:#e6e3dd;--accent:#0a7c5a;--accent-soft:#e3f3ec;--warn:#9a4b00;--warn-soft:#fdf0e1;--code-bg:#f4f2ee;--code-ink:#24292f}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--accent:#3fcf9a;--accent-soft:#16302a;--warn:#f3a35c;--warn-soft:#33251a;--code-bg:#202024;--code-ink:#e6e6e6}}
+:root[data-theme="dark"]{--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--accent:#3fcf9a;--accent-soft:#16302a;--warn:#f3a35c;--warn-soft:#33251a;--code-bg:#202024;--code-ink:#e6e6e6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{display:grid;grid-template-columns:220px minmax(0,1fr);max-width:1100px;margin:0 auto;gap:40px;padding:32px 16px}
+aside{position:sticky;top:24px;align-self:start;display:flex;flex-direction:column;gap:2px;font-size:14px}
+aside a{color:var(--mute);text-decoration:none;padding:5px 10px;border-radius:6px}
+aside a:hover{color:var(--ink);background:var(--code-bg)}
+aside a.on{color:var(--accent);background:var(--accent-soft);font-weight:600}
+main{min-width:0;max-width:760px}
+h1{font-size:30px;line-height:1.2;margin:0 0 8px;letter-spacing:-.01em}
+h2{font-size:21px;margin:36px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
+h3{font-size:17px;margin:24px 0 6px}
+a{color:var(--accent)}
+code{font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+.code{margin:12px 0 18px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--code-bg)}
+.file{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;border-bottom:1px solid var(--line);font:12.5px ui-monospace,Menlo,Consolas,monospace;color:var(--mute);background:var(--panel)}
+.copy{font:12px system-ui,sans-serif;border:1px solid var(--line);background:transparent;color:var(--mute);border-radius:5px;padding:2px 8px;cursor:pointer}
+.copy:hover{color:var(--ink)}
+pre{margin:0;padding:14px 16px;overflow-x:auto}
+pre code{background:none;padding:0;color:var(--code-ink);white-space:pre}
+.note,.warn{padding:10px 14px;border-radius:8px;margin:14px 0;border-left:3px solid var(--accent);background:var(--accent-soft)}
+.warn{border-color:var(--warn);background:var(--warn-soft)}
+ul.todo{list-style:none;padding-left:0}
+ul.todo li{padding:3px 0}
+ul.todo input{accent-color:var(--accent);margin-right:6px;transform:translateY(1px)}
+ul.todo input:checked+span{color:var(--mute);text-decoration:line-through}
+.pn{display:flex;justify-content:space-between;margin:48px 0 16px;padding-top:16px;border-top:1px solid var(--line)}
+.pn a{text-decoration:none;font-weight:600}
+@media (max-width:820px){.wrap{grid-template-columns:1fr;gap:16px}aside{position:static;flex-direction:row;overflow-x:auto;white-space:nowrap;padding-bottom:6px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<aside>
+<a href="index.html">Start here</a>
+<a href="day-01.html">Day 1 · Setup</a>
+<a href="day-02.html" class=on>Day 2 · Schema</a>
+<a href="day-03.html">Day 3 · Isolation</a>
+<a href="day-04.html">Day 4 · Access engine</a>
+<a href="day-05.html">Day 5 · OCPP gateway</a>
+<a href="day-06.html">Day 6 · Handlers</a>
+<a href="day-07.html">Day 7 · Sessions</a>
+<a href="day-08.html">Day 8 · Bot onboarding</a>
+<a href="day-09.html">Day 9 · QR flow</a>
+<a href="day-10.html">Day 10 · Wallet</a>
+<a href="day-11.html">Day 11 · Auth</a>
+<a href="day-12.html">Day 12 · Super admin</a>
+<a href="day-13.html">Day 13 · Tenant dashboard</a>
+<a href="day-14.html">Day 14 · Go live</a>
+</aside>
+<main>
+<h1>Day 2 — Database schema &amp; seed</h1>
+<p><strong>Goal:</strong> the full Prisma schema, first migration, and seed data you can test with all week.</p>
+<h2>What changed from the original plan (and why)</h2>
+<ul>
+<li><strong>Added <code>ChargingSession</code></strong> — it was referenced but never defined.</li>
+<li><strong><code>TenantMembership.phone</code> + optional <code>userId</code></strong> — admins add drivers by phone <em>before</em> the driver has ever opened the bot. We link <code>userId</code> when they share their contact.</li>
+<li><strong>Session has <code>transactionId</code> (Int) and <code>idTag</code> (≤20 chars)</strong> — OCPP 1.6 requires both in these formats.</li>
+<li><strong>Session stores <code>mode</code> + <code>pricePerKwh</code></strong> — the price is locked at start.</li>
+<li><strong>Added <code>AdminUser</code></strong> (dashboard logins) and <strong><code>Payment</code></strong> (wallet top-ups).</li>
+<li><strong>Money is <code>Decimal(12,2)</code></strong>, never <code>Float</code>.</li>
+</ul>
+<h2>Tasks</h2>
+<ul class="todo">
+<li><label><input type="checkbox" data-k="day-02-1"> <span>Install Prisma 6 in <code>packages/db</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-02-2"> <span>Write <code>schema.prisma</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-02-3"> <span>Run the first migration</span></label></li>
+<li><label><input type="checkbox" data-k="day-02-4"> <span>Export a shared Prisma client</span></label></li>
+<li><label><input type="checkbox" data-k="day-02-5"> <span>Write and run the seed</span></label></li>
+</ul>
+<div class="code"><div class="file"><span>terminal</span><button class="copy">Copy</button></div><pre><code>pnpm --filter @ev/db add @prisma/client@6 bcryptjs
+pnpm --filter @ev/db add -D prisma@6 tsx @types/bcryptjs</code></pre></div>
+<div class="note">Pin Prisma 6 for this project. Newer major versions change the setup, and this guide follows v6.</div>
+<div class="code"><div class="file"><span>packages/db/.env</span><button class="copy">Copy</button></div><pre><code>DATABASE_URL=&quot;postgresql://ev:ev@localhost:5432/ev&quot;</code></pre></div>
+<div class="code"><div class="file"><span>packages/db/package.json — add</span><button class="copy">Copy</button></div><pre><code>&quot;main&quot;: &quot;./src/index.ts&quot;,
+&quot;types&quot;: &quot;./src/index.ts&quot;,
+&quot;scripts&quot;: {
+  &quot;generate&quot;: &quot;prisma generate&quot;,
+  &quot;migrate&quot;: &quot;prisma migrate dev&quot;,
+  &quot;studio&quot;: &quot;prisma studio&quot;,
+  &quot;seed&quot;: &quot;tsx prisma/seed.ts&quot;
+}</code></pre></div>
+<h2>The schema</h2>
+<div class="code"><div class="file"><span>packages/db/prisma/schema.prisma</span><button class="copy">Copy</button></div><pre><code>generator client {
+  provider = &quot;prisma-client-js&quot;
+}
+
+datasource db {
+  provider = &quot;postgresql&quot;
+  url      = env(&quot;DATABASE_URL&quot;)
+}
+
+enum AccessMode {
+  PUBLIC
+  PRIVATE_MEMBER // society resident / office employee
+  FLEET          // commercial fleet driver
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  TENANT_ADMIN
+}
+
+enum SessionStatus {
+  PENDING   // remote start sent, waiting for StartTransaction
+  ACTIVE
+  COMPLETED
+  FAILED
+}
+
+enum PaymentStatus {
+  CREATED
+  PAID
+  FAILED
+}
+
+model Tenant {
+  id           String              @id @default(uuid())
+  name         String
+  slug         String              @unique
+  createdAt    DateTime            @default(now())
+  chargePoints ChargePoint[]
+  memberships  TenantMembership[]
+  sessions     ChargingSession[]
+  tariffRules  ChargerTariffRule[]
+  admins       AdminUser[]
+}
+
+model User {
+  id            String             @id @default(uuid())
+  telegramId    String             @unique
+  phone         String?            @unique // E.164, e.g. +919876543210
+  name          String?
+  walletBalance Decimal            @default(0) @db.Decimal(12, 2)
+  createdAt     DateTime           @default(now())
+  memberships   TenantMembership[]
+  sessions      ChargingSession[]
+  payments      Payment[]
+}
+
+model TenantMembership {
+  id        String     @id @default(uuid())
+  tenantId  String
+  phone     String     // what the admin types in
+  userId    String?    // filled when the driver shares their contact
+  role      AccessMode // FLEET or PRIVATE_MEMBER only
+  name      String?
+  vehicleNo String?
+  isActive  Boolean    @default(true)
+  tenant    Tenant     @relation(fields: [tenantId], references: [id])
+  user      User?      @relation(fields: [userId], references: [id])
+
+  @@unique([tenantId, phone])
+  @@unique([tenantId, userId])
+}
+
+model ChargePoint {
+  id           String              @id @default(uuid())
+  ocppId       String              @unique // &quot;CP_101&quot;
+  name         String?
+  tenantId     String
+  allowedModes AccessMode[]        // [&quot;FLEET&quot;], [&quot;FLEET&quot;,&quot;PUBLIC&quot;], ...
+  isOnline     Boolean             @default(false)
+  lastSeenAt   DateTime?
+  tenant       Tenant              @relation(fields: [tenantId], references: [id])
+  connectors   Connector[]
+  tariffRules  ChargerTariffRule[]
+}
+
+model Connector {
+  id            String            @id @default(uuid())
+  chargePointId String
+  connectorId   Int               // 1, 2 (OCPP number)
+  status        String            @default(&quot;Unavailable&quot;)
+  chargePoint   ChargePoint       @relation(fields: [chargePointId], references: [id])
+  sessions      ChargingSession[]
+
+  @@unique([chargePointId, connectorId])
+}
+
+model ChargerTariffRule {
+  id            String      @id @default(uuid())
+  chargePointId String
+  tenantId      String
+  mode          AccessMode
+  pricePerKwh   Decimal     @db.Decimal(10, 2)
+  chargePoint   ChargePoint @relation(fields: [chargePointId], references: [id])
+  tenant        Tenant      @relation(fields: [tenantId], references: [id])
+
+  @@unique([chargePointId, mode])
+}
+
+model ChargingSession {
+  id              String        @id @default(uuid())
+  transactionId   Int           @unique @default(autoincrement()) // sent to charger
+  idTag           String        @unique // random, ≤ 20 chars
+  userId          String
+  tenantId        String
+  connectorId     String
+  mode            AccessMode    // locked at start
+  pricePerKwh     Decimal       @db.Decimal(10, 2) // locked at start
+  status          SessionStatus @default(PENDING)
+  meterStartWh    Int?
+  meterLastWh     Int?
+  meterStopWh     Int?
+  energyKwh       Decimal?      @db.Decimal(10, 3)
+  amount          Decimal?      @db.Decimal(12, 2)
+  telegramChatId  String?
+  statusMessageId Int?          // the live message we keep editing
+  createdAt       DateTime      @default(now())
+  startedAt       DateTime?
+  stoppedAt       DateTime?
+  user            User          @relation(fields: [userId], references: [id])
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
+  connector       Connector     @relation(fields: [connectorId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([userId, status])
+}
+
+model AdminUser {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  role         AdminRole
+  tenantId     String?   // null for SUPER_ADMIN
+  tenant       Tenant?   @relation(fields: [tenantId], references: [id])
+}
+
+model Payment {
+  id             String        @id @default(uuid())
+  userId         String
+  amount         Decimal       @db.Decimal(12, 2)
+  status         PaymentStatus @default(CREATED)
+  razorpayLinkId String?       @unique
+  createdAt      DateTime      @default(now())
+  paidAt         DateTime?
+  user           User          @relation(fields: [userId], references: [id])
+}</code></pre></div>
+<div class="code"><div class="file"><span>terminal</span><button class="copy">Copy</button></div><pre><code>pnpm --filter @ev/db exec prisma migrate dev --name init</code></pre></div>
+<h2>Shared client</h2>
+<div class="code"><div class="file"><span>packages/db/src/client.ts</span><button class="copy">Copy</button></div><pre><code>import { PrismaClient } from &quot;@prisma/client&quot;;
+
+// Reuse one client across hot reloads in dev.
+const g = globalThis as unknown as { prisma?: PrismaClient };
+export const prisma = g.prisma ?? new PrismaClient();
+if (process.env.NODE_ENV !== &quot;production&quot;) g.prisma = prisma;</code></pre></div>
+<div class="code"><div class="file"><span>packages/db/src/phone.ts</span><button class="copy">Copy</button></div><pre><code>// One phone format everywhere: +91XXXXXXXXXX
+export function normalizePhone(input: string): string {
+  const digits = input.replace(/\D/g, &quot;&quot;);
+  if (digits.length === 10) return `+91${digits}`;
+  return `+${digits}`;
+}</code></pre></div>
+<div class="code"><div class="file"><span>packages/db/src/index.ts</span><button class="copy">Copy</button></div><pre><code>export * from &quot;@prisma/client&quot;;
+export { prisma } from &quot;./client&quot;;
+export { normalizePhone } from &quot;./phone&quot;;</code></pre></div>
+<h2>Seed</h2>
+<p>Creates: a super admin, one tenant + tenant admin, one hybrid charger <code>CP_TEST01</code> (FLEET free + PUBLIC ₹18) with 2 connectors, one fleet member.</p>
+<div class="code"><div class="file"><span>packages/db/prisma/seed.ts</span><button class="copy">Copy</button></div><pre><code>import bcrypt from &quot;bcryptjs&quot;;
+import { prisma } from &quot;../src/client&quot;;
+
+async function main() {
+  const hash = await bcrypt.hash(&quot;admin123&quot;, 10);
+
+  await prisma.adminUser.upsert({
+    where: { email: &quot;super@ev.local&quot; }, update: {},
+    create: { email: &quot;super@ev.local&quot;, passwordHash: hash, role: &quot;SUPER_ADMIN&quot; },
+  });
+
+  const tenant = await prisma.tenant.upsert({
+    where: { slug: &quot;tata-fleet&quot; }, update: {},
+    create: { name: &quot;Tata Fleet&quot;, slug: &quot;tata-fleet&quot; },
+  });
+
+  await prisma.adminUser.upsert({
+    where: { email: &quot;admin@tata.local&quot; }, update: {},
+    create: { email: &quot;admin@tata.local&quot;, passwordHash: hash, role: &quot;TENANT_ADMIN&quot;, tenantId: tenant.id },
+  });
+
+  const cp = await prisma.chargePoint.upsert({
+    where: { ocppId: &quot;CP_TEST01&quot; }, update: {},
+    create: {
+      ocppId: &quot;CP_TEST01&quot;, name: &quot;Depot Bay 1&quot;, tenantId: tenant.id,
+      allowedModes: [&quot;FLEET&quot;, &quot;PUBLIC&quot;],
+      connectors: { create: [{ connectorId: 1 }, { connectorId: 2 }] },
+    },
+  });
+
+  for (const [mode, price] of [[&quot;FLEET&quot;, 0], [&quot;PUBLIC&quot;, 18]] as const) {
+    await prisma.chargerTariffRule.upsert({
+      where: { chargePointId_mode: { chargePointId: cp.id, mode } }, update: {},
+      create: { chargePointId: cp.id, tenantId: tenant.id, mode, pricePerKwh: price },
+    });
+  }
+
+  // Put YOUR phone here to test fleet mode in Telegram.
+  await prisma.tenantMembership.upsert({
+    where: { tenantId_phone: { tenantId: tenant.id, phone: &quot;+919999999999&quot; } }, update: {},
+    create: { tenantId: tenant.id, phone: &quot;+919999999999&quot;, role: &quot;FLEET&quot;, name: &quot;Test Driver&quot; },
+  });
+}
+
+main().finally(() =&gt; prisma.$disconnect());</code></pre></div>
+<div class="code"><div class="file"><span>terminal</span><button class="copy">Copy</button></div><pre><code>pnpm db:seed
+pnpm db:studio</code></pre></div>
+<h2>Done when</h2>
+<ul class="todo">
+<li><label><input type="checkbox" data-k="day-02-6"> <span>Migration created in <code>packages/db/prisma/migrations/</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-02-7"> <span>Prisma Studio shows the seeded tenant, charger, 2 connectors, 2 tariff rules</span></label></li>
+<li><label><input type="checkbox" data-k="day-02-8"> <span>You can <code>import { prisma } from &quot;@ev/db&quot;</code> inside <code>apps/api</code></span></label></li>
+</ul>
+<nav class="pn"><a href="day-01.html">← Day 1 · Setup</a><a href="day-03.html">Day 3 · Isolation →</a></nav>
+</main>
+</div>
+<script>
+document.querySelectorAll('.copy').forEach(b=>b.onclick=()=>{navigator.clipboard.writeText(b.closest('.code').querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)});
+document.querySelectorAll('input[data-k]').forEach(c=>{try{c.checked=localStorage.getItem(c.dataset.k)==='1'}catch(e){}c.onchange=()=>{try{localStorage.setItem(c.dataset.k,c.checked?'1':'0')}catch(e){}}});
+</script>
+</body>
+</html>
