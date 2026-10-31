@@ -103,7 +103,9 @@ ul.todo input:checked+span{color:var(--mute);text-decoration:line-through}
 <h2>Final folder layout</h2>
 <div class="code"><div class="file"><span>ev-platform/</span><button class="copy">Copy</button></div><pre><code>ev-platform/
 ├─ AGENTS.md              ← context file for your AI assistant
-├─ docker-compose.yml     ← Postgres
+├─ Dockerfile             ← API image (built by GitHub Actions, run in production)
+├─ .dockerignore
+├─ .github/workflows/docker.yml
 ├─ pnpm-workspace.yaml
 ├─ turbo.json
 ├─ apps/

@@ -80,7 +80,10 @@ ul.todo input:checked+span{color:var(--mute);text-decoration:line-through}
 <div class="code"><div class="file"><span>terminal</span><button class="copy">Copy</button></div><pre><code>pnpm --filter @ev/db add @prisma/client@6 bcryptjs
 pnpm --filter @ev/db add -D prisma@6 tsx @types/bcryptjs</code></pre></div>
 <div class="note">Pin Prisma 6 for this project. Newer major versions change the setup, and this guide follows v6.</div>
-<div class="code"><div class="file"><span>packages/db/.env</span><button class="copy">Copy</button></div><pre><code>DATABASE_URL=&quot;postgresql://ev:ev@localhost:5432/ev&quot;</code></pre></div>
+<div class="note">The install will stop with <code>ERR_PNPM_IGNORED_BUILDS</code> for Prisma. That is expected: open <code>pnpm-workspace.yaml</code>, and under <code>allowBuilds:</code> set <code>prisma: true</code>, <code>"@prisma/client": true</code> and <code>"@prisma/engines": true</code> (replace any placeholder pnpm added), then run <code>pnpm install</code> again.</div>
+<div class="note">Also run <code>pnpm --filter @ev/api add @prisma/client@6</code>. The API Docker image bundles your code into one file, and that file must find Prisma at runtime.</div>
+<div class="code"><div class="file"><span>packages/db/.env — the two Neon strings you saved on Day 1</span><button class="copy">Copy</button></div><pre><code>DATABASE_URL=&quot;postgresql://USER:PASSWORD@ep-xxxx-pooler.REGION.aws.neon.tech/neondb?sslmode=require&amp;pgbouncer=true&quot;
+DIRECT_URL=&quot;postgresql://USER:PASSWORD@ep-xxxx.REGION.aws.neon.tech/neondb?sslmode=require&quot;</code></pre></div>
 <div class="code"><div class="file"><span>packages/db/package.json — add</span><button class="copy">Copy</button></div><pre><code>&quot;main&quot;: &quot;./src/index.ts&quot;,
 &quot;types&quot;: &quot;./src/index.ts&quot;,
 &quot;scripts&quot;: {
@@ -96,7 +99,8 @@ pnpm --filter @ev/db add -D prisma@6 tsx @types/bcryptjs</code></pre></div>
 
 datasource db {
   provider = &quot;postgresql&quot;
-  url      = env(&quot;DATABASE_URL&quot;)
+  url       = env(&quot;DATABASE_URL&quot;) // pooled: used by the running app
+  directUrl = env(&quot;DIRECT_URL&quot;)   // direct: used by prisma migrate
 }
 
 enum AccessMode {
@@ -317,6 +321,53 @@ pnpm db:studio</code></pre></div>
 <li><label><input type="checkbox" data-k="day-02-6"> <span>Migration created in <code>packages/db/prisma/migrations/</code></span></label></li>
 <li><label><input type="checkbox" data-k="day-02-7"> <span>Prisma Studio shows the seeded tenant, charger, 2 connectors, 2 tariff rules</span></label></li>
 <li><label><input type="checkbox" data-k="day-02-8"> <span>You can <code>import { prisma } from &quot;@ev/db&quot;</code> inside <code>apps/api</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-02-9"> <span>GitHub Actions builds the Docker image (green tick, next section)</span></label></li>
+</ul>
+<h2>Prove the Docker image builds (without Docker on your PC)</h2>
+<p>The schema now exists, so the Day 1 <code>Dockerfile</code> can build. GitHub builds it for you on every push, and also publishes it to GitHub's free container registry (GHCR), which is where your server will pull it from on Day 14.</p>
+<div class="code"><div class="file"><span>.github/workflows/docker.yml</span><button class="copy">Copy</button></div><pre><code>name: docker
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  api-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/ev-api:latest
+            ghcr.io/${{ github.repository_owner }}/ev-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max</code></pre></div>
+<div class="code"><div class="file"><span>.github/dependabot.yml</span><button class="copy">Copy</button></div><pre><code>version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly</code></pre></div>
+<ul>
+<li><strong>Pin the actions to commit SHAs.</strong> A tag like <code>@v3</code> can be moved by the action's author, and this job can publish packages. For each <code>docker/*</code> action, open its GitHub Releases page, copy the full 40-character commit SHA of the release, and write <code>uses: docker/login-action@&lt;40-char-sha&gt; # v3.x.y</code>. Do the same for <code>actions/checkout</code>. Then add the Dependabot file below so the SHAs get updated for you.</li>
+<li>Pull requests only <em>build</em> the image (to catch Dockerfile mistakes). Pushes to <code>main</code> also publish it.</li>
+<li>Docker image names must be lowercase. If your GitHub username has capitals, replace <code>${{ github.repository_owner }}</code> with the lowercase name.</li>
+<li>Image tagged with the commit SHA = you can roll back to any older version on the server.</li>
+<li>If the build fails, read the red step in the Actions tab. The most common causes are a missing file in a <code>COPY</code> line or a lockfile that isn't committed.</li>
 </ul>
 <nav class="pn"><a href="day-01.html">← Day 1 · Setup</a><a href="day-03.html">Day 3 · Isolation →</a></nav>
 </main>

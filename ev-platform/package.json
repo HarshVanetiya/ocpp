@@ -1,0 +1,17 @@
+{
+    "name": "ev-platform",
+    "private": true,
+    "packageManager": "pnpm@12.14.0",
+    "scripts": {
+        "dev": "turbo dev",
+        "build": "turbo build",
+        "test": "turbo test",
+        "db:migrate": "pnpm --filter @ev/db migrate",
+        "db:seed": "pnpm --filter @ev/db seed",
+        "db:studio": "pnpm --filter @ev/db studio"
+    },
+    "devDependencies": {
+        "turbo": "^2.11.10",
+        "typescript": "^7.0.2"
+    }
+}

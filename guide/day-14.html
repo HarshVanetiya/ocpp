@@ -65,7 +65,7 @@ ul.todo input:checked+span{color:var(--mute);text-decoration:line-through}
 <li><label><input type="checkbox" data-k="day-14-1"> <span>Telegram webhook instead of polling</span></label></li>
 <li><label><input type="checkbox" data-k="day-14-2"> <span>Mark chargers offline when heartbeats stop</span></label></li>
 <li><label><input type="checkbox" data-k="day-14-3"> <span>Clean up stuck <code>PENDING</code> sessions on boot</span></label></li>
-<li><label><input type="checkbox" data-k="day-14-4"> <span>Deploy (Docker Compose + Caddy for TLS)</span></label></li>
+<li><label><input type="checkbox" data-k="day-14-4"> <span>Deploy (API image from GHCR + Caddy for TLS; database stays on Neon)</span></label></li>
 <li><label><input type="checkbox" data-k="day-14-5"> <span>Connect one real charger, run a real paid session</span></label></li>
 </ul>
 <h2>1. Telegram webhook</h2>
@@ -98,16 +98,53 @@ export const failStalePending = () =&gt; prisma.chargingSession.updateMany({
 <h2>3. Deploy</h2>
 <ul>
 <li>One VPS (2 GB RAM is enough), Docker installed, a domain pointing to it.</li>
-<li><code>docker-compose.yml</code>: <code>db</code> (Postgres), <code>api</code>, <code>web</code>, <code>caddy</code>.</li>
+<li><strong>No Postgres container.</strong> The database is the Neon <code>main</code> branch (or Aiven). Use its pooled URL as <code>DATABASE_URL</code>.</li>
+<li><code>docker-compose.yml</code> on the server has only <code>api</code>, <code>web</code> and <code>caddy</code>. The <code>api</code> image comes from GHCR (built by your Day 2 workflow), so nothing is built on the server.</li>
 <li>Caddy gives free HTTPS and proxies WebSockets automatically.</li>
 </ul>
+<div class="code"><div class="file"><span>docker-compose.yml (on the server)</span><button class="copy">Copy</button></div><pre><code>services:
+  api:
+    image: ghcr.io/YOUR_GITHUB_USER/ev-api:latest   # lowercase; use a :COMMIT_SHA tag to pin a version
+    restart: unless-stopped
+    env_file: .env.api          # DATABASE_URL, JWT_SECRET, TELEGRAM_*, RAZORPAY_*, PUBLIC_URL ... (never in git)
+    environment:
+      PORT: 4000
+  web:
+    image: ghcr.io/YOUR_GITHUB_USER/ev-web:latest   # or host the dashboard on Vercel instead and delete this service
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:4000
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: [&quot;80:80&quot;, &quot;443:443&quot;]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+volumes:
+  caddy_data:</code></pre></div>
+<div class="note">The dashboard (<code>apps/web</code>) is easiest on Vercel, which needs no Docker. If you'd rather containerise it too, use the same pattern as the API Dockerfile with Next.js <code>output: &quot;standalone&quot;</code>, and add a second job to the Day 2 workflow.</div>
+<h3>Migrations</h3>
+<p>Run migrations from your PC or from CI against Neon's <strong>direct</strong> URL, <strong>not</strong> inside the API container (the image has no Prisma CLI, and with several containers they would race each other).</p>
 <div class="code"><div class="file"><span>Caddyfile</span><button class="copy">Copy</button></div><pre><code>ev.example.com {
   handle /ocpp/*     { reverse_proxy api:4000 }
   handle /webhooks/* { reverse_proxy api:4000 }
   handle             { reverse_proxy web:3000 }
 }</code></pre></div>
-<div class="code"><div class="file"><span>terminal (on the server)</span><button class="copy">Copy</button></div><pre><code>pnpm --filter @ev/db exec prisma migrate deploy
-docker compose up -d --build</code></pre></div>
+<div class="code"><div class="file"><span>terminal (your PC, PowerShell) — migrate the production branch first</span><button class="copy">Copy</button></div><pre><code>$env:DATABASE_URL = &quot;&lt;Neon main-branch DIRECT url&gt;&quot;
+$env:DIRECT_URL   = $env:DATABASE_URL
+pnpm --filter @ev/db exec prisma migrate deploy</code></pre></div>
+<div class="code"><div class="file"><span>terminal (on the server) — deploy or update</span><button class="copy">Copy</button></div><pre><code>docker compose pull
+docker compose up -d</code></pre></div>
+<h3>Scaling to more than one API container</h3>
+<p>The code is built so one container works. Before you run two or more, fix these (all are in-memory today):</p>
+<ul>
+<li><strong>OCPP sockets:</strong> a charger is connected to exactly one container. A bot press handled by another container cannot reach it. You need a way to route <code>RemoteStart/Stop</code> to the container that owns the socket (e.g. Redis pub/sub keyed by <code>ocppId</code>), or a single container for OCPP and many for everything else.</li>
+<li><strong>Background jobs</strong> (<code>startJobs</code>): every container would run them. Run them in one container only (an env flag such as <code>RUN_JOBS=true</code>), or make them safe to repeat.</li>
+<li><strong>Telegram:</strong> webhook mode (above) already works with many containers, but long polling does not.</li>
+<li><strong>Bot throttle / live-message state</strong> kept in memory must move to the database or Redis.</li>
+<li><strong>Connections:</strong> each container opens a Prisma pool. Keep the pooled Neon URL and set <code>connection_limit=5</code> on it so N containers stay under the database limit.</li>
+</ul>
 <ul>
 <li>Charger URL to configure on hardware: <code>wss://ev.example.com/ocpp/&lt;ocppId&gt;</code></li>
 <li>Set <code>API_URL=http://api:4000</code> for the web container.</li>
@@ -116,7 +153,7 @@ docker compose up -d --build</code></pre></div>
 <ul class="todo">
 <li><label><input type="checkbox" data-k="day-14-6"> <span>Strong <code>JWT_SECRET</code>, seed passwords changed</span></label></li>
 <li><label><input type="checkbox" data-k="day-14-7"> <span>Razorpay <strong>live</strong> keys + live webhook</span></label></li>
-<li><label><input type="checkbox" data-k="day-14-8"> <span>Daily Postgres backup (<code>pg_dump</code> cron → off-server storage)</span></label></li>
+<li><label><input type="checkbox" data-k="day-14-8"> <span>Database backups: check your Neon/Aiven plan's point-in-time restore window; add a weekly <code>pg_dump</code> to off-provider storage</span></label></li>
 <li><label><input type="checkbox" data-k="day-14-9"> <span>Logs readable (<code>docker compose logs -f api</code>)</span></label></li>
 <li><label><input type="checkbox" data-k="day-14-10"> <span>Real charger: Boot → Status → remote start → MeterValues → stop → correct bill</span></label></li>
 <li><label><input type="checkbox" data-k="day-14-11"> <span>QR stickers printed for every connector</span></label></li>

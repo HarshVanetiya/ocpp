@@ -19,10 +19,11 @@ The developer is learning while building. Prefer simple, readable code over clev
 | Area | Choice |
 |---|---|
 | Package manager | **pnpm** workspaces (never npm/yarn) + Turborepo |
-| Backend | Node.js 22, **Express 5**, TypeScript, run with `tsx` |
+| Backend | Node.js 26, pnpm 12, **Express 5**, TypeScript, run with `tsx` |
 | OCPP | `ws` library, OCPP **1.6J** only, subprotocol `ocpp1.6` |
 | Telegram | **grammY** |
-| Database | PostgreSQL 16 + **Prisma 6** (pinned) |
+| Database | PostgreSQL 16 **hosted (Neon/Aiven)** + **Prisma 6** (pinned); never a Postgres container |
+| Deploy | API runs as a **Docker image** (scaled to N containers); dev runs with `pnpm dev`, no local Docker |
 | Validation | zod |
 | Payments | Razorpay Payment Links + webhook |
 | Frontend | Next.js (App Router) + Tailwind |
@@ -34,7 +35,8 @@ The developer is learning while building. Prefer simple, readable code over clev
 ```
 AGENTS.md            ← this file
 guide/               ← day-by-day HTML build guide (open guide/index.html)
-docker-compose.yml   ← Postgres
+Dockerfile           ← API image (built by GitHub Actions → GHCR; the developer cannot run Docker locally)
+.github/workflows/   ← docker.yml builds/pushes the API image
 pnpm-workspace.yaml
 turbo.json
 tsconfig.base.json
@@ -125,7 +127,7 @@ The Next.js app calls these as `/api/...` (rewrite to the API) so cookies are sa
 ## Commands
 
 ```bash
-docker compose up -d                 # Postgres
+# Postgres is hosted (Neon dev branch) — no local Docker, no docker-compose for the DB
 pnpm install
 pnpm db:migrate                      # prisma migrate dev
 pnpm db:seed                         # super@ev.local / admin@tata.local, password admin123, charger CP_TEST01
@@ -137,7 +139,7 @@ pnpm test
 ## Environment variables
 
 `apps/api/.env`: `DATABASE_URL`, `PORT`, `MIN_WALLET_BALANCE`, `TELEGRAM_BOT_TOKEN`, `BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET`, `PUBLIC_URL`, `JWT_SECRET`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`
-`packages/db/.env`: `DATABASE_URL`
+`packages/db/.env`: `DATABASE_URL` (pooled), `DIRECT_URL` (direct, for migrations)
 `apps/web/.env.local`: `API_URL`, `NEXT_PUBLIC_BOT_USERNAME`
 Never commit `.env` files.
 
@@ -153,7 +155,7 @@ Never commit `.env` files.
 
 The step-by-step guide lives in `guide/` (open `guide/index.html`). Update the checkboxes below at the end of each day so the assistant knows where we are.
 
-- [ ] Day 1 — Monorepo setup (pnpm, turbo, Docker Postgres)
+- [ ] Day 1 — Monorepo setup (pnpm, turbo, Neon Postgres, API Dockerfile)
 - [ ] Day 2 — Prisma schema, migration, seed
 - [ ] Day 3 — `tenantDb` isolation extension
 - [ ] Day 4 — Access & tariff engine + tests

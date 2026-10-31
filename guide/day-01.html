@@ -59,23 +59,31 @@ ul.todo input:checked+span{color:var(--mute);text-decoration:line-through}
 </aside>
 <main>
 <h1>Day 1 — Monorepo setup</h1>
-<p><strong>Goal:</strong> one repo, three packages (<code>apps/api</code>, <code>apps/web</code>, <code>packages/db</code>), Postgres running in Docker.</p>
+<p><strong>Goal:</strong> one repo, three packages (<code>apps/api</code>, <code>apps/web</code>, <code>packages/db</code>), a hosted Postgres (Neon), and a <code>Dockerfile</code> for the API that is ready for deployment.</p>
+<div class="note"><strong>How we use Docker in this project.</strong> You can't run Docker on your PC, and that's fine:
+<ul>
+<li><strong>Development:</strong> run the API with <code>pnpm dev</code> directly on Windows. The database is a hosted Postgres (Neon), not a local container.</li>
+<li><strong>Production:</strong> the API is a Docker image, built by GitHub Actions (Day 2) and pulled by the server. You can run several copies of it to scale. The database is still hosted (Neon/Aiven), never a container.</li>
+<li>So there is <strong>no <code>docker-compose.yml</code> for Postgres</strong> anywhere in this guide.</li>
+</ul></div>
 <h2>Tasks</h2>
 <ul class="todo">
-<li><label><input type="checkbox" data-k="day-01-1"> <span>Install Node 22 LTS, pnpm 10 (<code>corepack enable</code>), Docker</span></label></li>
+<li><label><input type="checkbox" data-k="day-01-1"> <span>Install Node 26, pnpm 12 (<code>npm i -g pnpm</code>; corepack is not bundled with Node 26), Git. Check with <code>node -v</code>, <code>pnpm -v</code></span></label></li>
 <li><label><input type="checkbox" data-k="day-01-2"> <span>Create root files: <code>package.json</code>, <code>pnpm-workspace.yaml</code>, <code>turbo.json</code>, <code>tsconfig.base.json</code></span></label></li>
-<li><label><input type="checkbox" data-k="day-01-3"> <span>Start Postgres with Docker Compose</span></label></li>
+<li><label><input type="checkbox" data-k="day-01-3"> <span>Create a hosted Postgres 16 database on Neon and save its two connection strings</span></label></li>
 <li><label><input type="checkbox" data-k="day-01-4"> <span>Create <code>packages/db</code>, <code>apps/api</code>, <code>apps/web</code></span></label></li>
 <li><label><input type="checkbox" data-k="day-01-5"> <span><code>pnpm dev</code> starts the API and the web app together</span></label></li>
+<li><label><input type="checkbox" data-k="day-01-9"> <span>Write the API <code>Dockerfile</code> and <code>.dockerignore</code> (built later by CI, not on your PC)</span></label></li>
 </ul>
+<div class="note">All terminal commands in this guide are written for <strong>Windows PowerShell</strong>. If you see <code>mkdir -p</code> or <code>&amp;&amp;</code> in your own notes, that is Linux/bash syntax and will not work here.</div>
 <h2>1. Root files</h2>
-<div class="code"><div class="file"><span>terminal</span><button class="copy">Copy</button></div><pre><code>corepack enable
-mkdir -p apps packages
-pnpm init
-pnpm add -Dw turbo typescript</code></pre></div>
-<div class="code"><div class="file"><span>package.json (root) — replace scripts</span><button class="copy">Copy</button></div><pre><code>{
+<div class="code"><div class="file"><span>terminal</span><button class="copy">Copy</button></div><pre><code>mkdir apps, packages
+pnpm init</code></pre></div>
+<p>Create <code>pnpm-workspace.yaml</code> (below) <strong>before</strong> the next command. <code>-w</code> only works inside a workspace.</p>
+<div class="code"><div class="file"><span>package.json (root) — set packageManager to your own <code>pnpm -v</code>, replace scripts</span><button class="copy">Copy</button></div><pre><code>{
   &quot;name&quot;: &quot;ev-platform&quot;,
   &quot;private&quot;: true,
+  &quot;packageManager&quot;: &quot;pnpm@12.14.0&quot;,
   &quot;scripts&quot;: {
     &quot;dev&quot;: &quot;turbo dev&quot;,
     &quot;build&quot;: &quot;turbo build&quot;,
@@ -89,13 +97,14 @@ pnpm add -Dw turbo typescript</code></pre></div>
   - &quot;apps/*&quot;
   - &quot;packages/*&quot;
 
-# pnpm 10 blocks install scripts by default. Prisma needs them.
-onlyBuiltDependencies:
-  - prisma
-  - &quot;@prisma/client&quot;
-  - &quot;@prisma/engines&quot;
-  - esbuild</code></pre></div>
-<div class="note">If pnpm still prints "Ignored build scripts", run <code>pnpm approve-builds</code> and select the Prisma packages.</div>
+# pnpm blocks install scripts by default and asks you to allow or deny each package.
+# (pnpm 12 calls this allowBuilds; pnpm 10 called it onlyBuiltDependencies. Don't use both.)
+allowBuilds:
+  esbuild: true         # compiler used by tsx and tsup; needs its install script
+  unrs-resolver: false  # ESLint helper, ships prebuilt, no script needed
+  sharp: false          # Next image tool, ships prebuilt</code></pre></div>
+<div class="code"><div class="file"><span>terminal — now install the root tools</span><button class="copy">Copy</button></div><pre><code>pnpm add -Dw turbo typescript</code></pre></div>
+<div class="note"><strong>"Ignored build scripts" / <code>ERR_PNPM_IGNORED_BUILDS</code></strong> is not a broken install. A package wants to run an install script, and pnpm waits for your answer. It may add a placeholder line like <code>esbuild: set this to true or false</code> to <code>pnpm-workspace.yaml</code>. Replace it with <code>true</code> (script needed) or <code>false</code> (not needed), then run <code>pnpm install</code> again. You will see this for Prisma on Day 2, where the answer is <code>true</code>.</div>
 <div class="code"><div class="file"><span>turbo.json</span><button class="copy">Copy</button></div><pre><code>{
   &quot;$schema&quot;: &quot;https://turbo.build/schema.json&quot;,
   &quot;tasks&quot;: {
@@ -115,32 +124,35 @@ onlyBuiltDependencies:
     &quot;resolveJsonModule&quot;: true
   }
 }</code></pre></div>
-<h2>2. Postgres</h2>
-<div class="code"><div class="file"><span>docker-compose.yml</span><button class="copy">Copy</button></div><pre><code>services:
-  db:
-    image: postgres:16
-    environment:
-      POSTGRES_USER: ev
-      POSTGRES_PASSWORD: ev
-      POSTGRES_DB: ev
-    ports: [&quot;5432:5432&quot;]
-    volumes: [pgdata:/var/lib/postgresql/data]
-volumes:
-  pgdata:</code></pre></div>
-<div class="code"><div class="file"><span>terminal</span><button class="copy">Copy</button></div><pre><code>docker compose up -d</code></pre></div>
+<h2>2. Postgres (hosted, no Docker)</h2>
+<ol>
+<li>Sign up at <a href="https://neon.tech">neon.tech</a> (free tier). Create a project: Postgres version <strong>16</strong>, region as close to India as offered (Mumbai if available, otherwise Singapore). Later put your server in the same region, because every query crosses the network.</li>
+<li>Neon gives every project a default branch (called <code>production</code> in the current console; older projects say <code>main</code>). Create a second branch called <code>dev</code> and use <strong>that</strong> for development. Production will use the default branch, so your test data never mixes with real data.</li>
+<li>Open <strong>Connect</strong> on the <code>dev</code> branch and copy <strong>two</strong> strings:
+<ul>
+<li><strong>Pooled</strong> (turn <em>Connection pooling</em> on, host contains <code>-pooler</code>) → this is <code>DATABASE_URL</code>, used by the running app.</li>
+<li><strong>Direct</strong> (pooling off) → this is <code>DIRECT_URL</code>, used only by <code>prisma migrate</code>.</li>
+</ul></li>
+</ol>
+<p>Why two? Several API containers will each open their own connections. The pooler (PgBouncer) shares a few real connections between all of them, so you won't hit the database's connection limit when you scale. Migrations need a normal direct connection.</p>
+<div class="code"><div class="file"><span>what the two strings look like (save them, you'll use them on Day 2)</span><button class="copy">Copy</button></div><pre><code>DATABASE_URL="postgresql://USER:PASSWORD@ep-xxxx-pooler.REGION.aws.neon.tech/neondb?sslmode=require&amp;pgbouncer=true"
+DIRECT_URL="postgresql://USER:PASSWORD@ep-xxxx.REGION.aws.neon.tech/neondb?sslmode=require"</code></pre></div>
+<div class="warn">These contain your database password. Never commit them. <code>.env</code> is already in <code>.gitignore</code>.</div>
+<div class="note">Using Aiven (or any other host) instead? It works the same. Aiven has no separate pooler URL in the basic plan, so put the <strong>same</strong> URL in both <code>DATABASE_URL</code> and <code>DIRECT_URL</code> and drop <code>&amp;pgbouncer=true</code>. Always keep <code>sslmode=require</code>.</div>
 <h2>3. Packages</h2>
-<div class="code"><div class="file"><span>terminal</span><button class="copy">Copy</button></div><pre><code>mkdir -p packages/db/src apps/api/src apps/api/scripts
-cd packages/db &amp;&amp; pnpm init &amp;&amp; cd ../..
-cd apps/api &amp;&amp; pnpm init &amp;&amp; cd ../..
+<div class="code"><div class="file"><span>terminal</span><button class="copy">Copy</button></div><pre><code>mkdir packages/db/src, apps/api/src, apps/api/scripts
+pnpm -C packages/db init
+pnpm -C apps/api init
 pnpm create next-app@latest apps/web --ts --app --tailwind --eslint --src-dir --import-alias &quot;@/*&quot; --use-pnpm</code></pre></div>
 <p>Set the <code>name</code> in each <code>package.json</code>: <code>@ev/db</code>, <code>@ev/api</code>, <code>@ev/web</code>.</p>
 <div class="code"><div class="file"><span>terminal — API dependencies</span><button class="copy">Copy</button></div><pre><code>pnpm --filter @ev/api add express ws grammy zod pino cookie-parser jsonwebtoken bcryptjs razorpay
 pnpm --filter @ev/api add -D tsx tsup vitest @types/node @types/express @types/ws @types/cookie-parser @types/jsonwebtoken
 pnpm --filter @ev/api add @ev/db@workspace:*</code></pre></div>
+<div class="note">On Day 2 you will also run <code>pnpm --filter @ev/api add @prisma/client@6</code> (same version as <code>@ev/db</code>). The Docker image needs it: the API is bundled into one file, and that file must be able to find Prisma at runtime.</div>
 <div class="code"><div class="file"><span>apps/api/package.json — scripts</span><button class="copy">Copy</button></div><pre><code>&quot;type&quot;: &quot;module&quot;,
 &quot;scripts&quot;: {
   &quot;dev&quot;: &quot;tsx watch src/index.ts&quot;,
-  &quot;build&quot;: &quot;tsup src/index.ts --format esm&quot;,
+  &quot;build&quot;: &quot;tsup src/index.ts --format esm --noExternal @ev/db&quot;,
   &quot;start&quot;: &quot;node dist/index.js&quot;,
   &quot;test&quot;: &quot;vitest run&quot;,
   &quot;sim&quot;: &quot;tsx scripts/sim.ts&quot;
@@ -149,13 +161,66 @@ pnpm --filter @ev/api add @ev/db@workspace:*</code></pre></div>
 <p>Temporary entry so <code>pnpm dev</code> works today:</p>
 <div class="code"><div class="file"><span>apps/api/src/index.ts</span><button class="copy">Copy</button></div><pre><code>import express from &quot;express&quot;;
 
+const PORT = Number(process.env.PORT ?? 4000); // hosts/containers tell us the port via PORT
 const app = express();
 app.get(&quot;/health&quot;, (_req, res) =&gt; { res.json({ ok: true }); });
-app.listen(4000, () =&gt; console.log(&quot;API on http://localhost:4000&quot;));</code></pre></div>
+const server = app.listen(PORT, () =&gt; console.log(`API on port ${PORT}`));
+
+// Docker sends SIGTERM when it stops or replaces a container. Close cleanly instead of being killed.
+process.on(&quot;SIGTERM&quot;, () =&gt; server.close(() =&gt; process.exit(0)));</code></pre></div>
+<h2>4. Dockerfile for the API</h2>
+<p>You can't build this on your PC, so write it carefully now; GitHub Actions will build it for you on Day 2. Both files live in the <strong>repo root</strong>, because the build needs the whole monorepo (<code>apps/api</code> and <code>packages/db</code>).</p>
+<div class="code"><div class="file"><span>.dockerignore</span><button class="copy">Copy</button></div><pre><code>**/node_modules
+**/dist
+**/.next
+**/.env
+**/.env.*
+.git
+.turbo
+guide</code></pre></div>
+<div class="code"><div class="file"><span>Dockerfile</span><button class="copy">Copy</button></div><pre><code>FROM node:26-slim AS build
+# Prisma's engine needs OpenSSL, which the slim image lacks
+RUN apt-get update -y &amp;&amp; apt-get install -y openssl &amp;&amp; rm -rf /var/lib/apt/lists/*
+# Same pnpm as your PC (corepack is not in Node 26). Use the "packageManager" version in your root package.json.
+RUN npm install -g pnpm@12.14.0
+WORKDIR /app
+
+# Copy only the package files first, so this install layer is cached until dependencies change
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+COPY packages/db/package.json packages/db/
+# (web's package.json is only here so the lockfile matches; its code is never copied or installed)
+RUN pnpm install --frozen-lockfile --filter &quot;@ev/api...&quot;
+
+COPY tsconfig.base.json ./
+COPY apps/api apps/api
+COPY packages/db packages/db
+# Generate the Prisma client inside the image so it matches Linux, not your Windows machine
+RUN pnpm --filter @ev/db exec prisma generate
+RUN pnpm --filter @ev/api build
+
+FROM node:26-slim
+RUN apt-get update -y &amp;&amp; apt-get install -y openssl &amp;&amp; rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app /app
+USER node
+EXPOSE 4000
+HEALTHCHECK --interval=30s --timeout=3s CMD node -e &quot;fetch('http://localhost:'+(process.env.PORT||4000)+'/health').then(r=&gt;process.exit(r.ok?0:1)).catch(()=&gt;process.exit(1))&quot;
+CMD [&quot;node&quot;, &quot;apps/api/dist/index.js&quot;]</code></pre></div>
+<ul>
+<li><strong>No secrets in the image.</strong> <code>.env</code> is excluded. The server passes <code>DATABASE_URL</code>, <code>JWT_SECRET</code> etc. as environment variables at run time. The same image works for staging and production.</li>
+<li><strong>Why <code>--noExternal @ev/db</code>?</strong> <code>@ev/db</code> is TypeScript source (<code>main: ./src/index.ts</code>), which plain <code>node</code> can't run. This flag makes <code>tsup</code> compile it into the API bundle.</li>
+<li>The image is bigger than it needs to be (it copies the whole build stage). That's fine for the MVP; you can slim it later.</li>
+<li><strong>This Dockerfile only builds after Day 2</strong>, because it needs the Prisma schema. Don't worry if you can't test it today.</li>
+</ul>
+<div class="note"><strong>Building for scale: rules the code must follow.</strong> Several copies of this container can run at once. Keep the API <em>stateless</em> where you can. Anything stored in memory (the OCPP socket <code>Map</code>, bot throttles, background jobs) exists in only one copy. Day 5 and Day 14 say what that means for you; for the MVP, run one container and keep these in mind.</div>
 <h2>Done when</h2>
 <ul class="todo">
-<li><label><input type="checkbox" data-k="day-01-6"> <span><code>docker compose ps</code> shows Postgres running</span></label></li>
+<li><label><input type="checkbox" data-k="day-01-6"> <span>Neon dev branch exists; <code>select version();</code> in Neon's SQL Editor shows PostgreSQL 16, and both connection strings are saved somewhere safe</span></label></li>
 <li><label><input type="checkbox" data-k="day-01-7"> <span><code>pnpm dev</code> → <code>http://localhost:4000/health</code> returns <code>{&quot;ok&quot;:true}</code> and <code>http://localhost:3000</code> shows Next.js</span></label></li>
+<li><label><input type="checkbox" data-k="day-01-10"> <span><code>Dockerfile</code> and <code>.dockerignore</code> are in the repo root</span></label></li>
 <li><label><input type="checkbox" data-k="day-01-8"> <span>First commit pushed</span></label></li>
 </ul>
 <nav class="pn"><a href="index.html">← Start here</a><a href="day-02.html">Day 2 · Schema →</a></nav>
