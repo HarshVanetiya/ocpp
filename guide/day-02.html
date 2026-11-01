@@ -71,14 +71,14 @@ ul.todo input:checked+span{color:var(--mute);text-decoration:line-through}
 </ul>
 <h2>Tasks</h2>
 <ul class="todo">
-<li><label><input type="checkbox" data-k="day-02-1"> <span>Install Prisma 6 in <code>packages/db</code></span></label></li>
+<li><label><input type="checkbox" data-k="day-02-1"> <span>Install Prisma 6 in <code>packages/db</code> (run all commands from <code>D:\ocpp\ev-platform</code>)</span></label></li>
 <li><label><input type="checkbox" data-k="day-02-2"> <span>Write <code>schema.prisma</code></span></label></li>
 <li><label><input type="checkbox" data-k="day-02-3"> <span>Run the first migration</span></label></li>
 <li><label><input type="checkbox" data-k="day-02-4"> <span>Export a shared Prisma client</span></label></li>
 <li><label><input type="checkbox" data-k="day-02-5"> <span>Write and run the seed</span></label></li>
 </ul>
 <div class="code"><div class="file"><span>terminal</span><button class="copy">Copy</button></div><pre><code>pnpm --filter @ev/db add @prisma/client@6 bcryptjs
-pnpm --filter @ev/db add -D prisma@6 tsx @types/bcryptjs</code></pre></div>
+pnpm --filter @ev/db add -D prisma@6 tsx @types/bcryptjs @types/node</code></pre></div>
 <div class="note">Pin Prisma 6 for this project. Newer major versions change the setup, and this guide follows v6.</div>
 <div class="note">The install will stop with <code>ERR_PNPM_IGNORED_BUILDS</code> for Prisma. That is expected: open <code>pnpm-workspace.yaml</code>, and under <code>allowBuilds:</code> set <code>prisma: true</code>, <code>"@prisma/client": true</code> and <code>"@prisma/engines": true</code> (replace any placeholder pnpm added), then run <code>pnpm install</code> again.</div>
 <div class="note">Also run <code>pnpm --filter @ev/api add @prisma/client@6</code>. The API Docker image bundles your code into one file, and that file must find Prisma at runtime.</div>
@@ -93,6 +93,7 @@ DIRECT_URL=&quot;postgresql://USER:PASSWORD@ep-xxxx.REGION.aws.neon.tech/neondb?
   &quot;seed&quot;: &quot;tsx prisma/seed.ts&quot;
 }</code></pre></div>
 <h2>The schema</h2>
+<div class="note"><strong>Red squiggle on <code>directUrl</code> in VS Code?</strong> The Prisma VS Code extension may say "<em>directUrl is no longer supported in schema files, move it to prisma.config.ts</em>". That rule is for Prisma 7. We pin Prisma 6, where <code>url</code> and <code>directUrl</code> belong in the schema. Run <code>pnpm exec prisma validate</code> in <code>packages/db</code>: if it says "valid", ignore the squiggle. Do not move the URLs to a config file. <strong>Fix:</strong> keep only the stable <em>Prisma</em> extension (disable <em>Prisma - Insider</em>), then in VS Code settings (<code>Ctrl+,</code>, search <code>prisma</code>) turn on <strong>Pin to Prisma 6</strong> and reload the window.</div>
 <div class="code"><div class="file"><span>packages/db/prisma/schema.prisma</span><button class="copy">Copy</button></div><pre><code>generator client {
   provider = &quot;prisma-client-js&quot;
 }
@@ -131,6 +132,7 @@ model Tenant {
   id           String              @id @default(uuid())
   name         String
   slug         String              @unique
+  country      String              @default(&quot;IN&quot;) // ISO code (IN, GB, AE...): default for local phone numbers
   createdAt    DateTime            @default(now())
   chargePoints ChargePoint[]
   memberships  TenantMembership[]
@@ -258,19 +260,29 @@ model Payment {
 const g = globalThis as unknown as { prisma?: PrismaClient };
 export const prisma = g.prisma ?? new PrismaClient();
 if (process.env.NODE_ENV !== &quot;production&quot;) g.prisma = prisma;</code></pre></div>
-<div class="code"><div class="file"><span>packages/db/src/phone.ts</span><button class="copy">Copy</button></div><pre><code>// One phone format everywhere: +91XXXXXXXXXX
-export function normalizePhone(input: string): string {
-  const digits = input.replace(/\D/g, &quot;&quot;);
-  if (digits.length === 10) return `+91${digits}`;
-  return `+${digits}`;
+<div class="code"><div class="file"><span>packages/db/tsconfig.json</span><button class="copy">Copy</button></div><pre><code>{ &quot;extends&quot;: &quot;../../tsconfig.base.json&quot;, &quot;include&quot;: [&quot;src&quot;, &quot;prisma&quot;] }</code></pre></div>
+<p>Check the package compiles: <code>pnpm --filter @ev/db exec tsc --noEmit</code> (no output = success). Run it from <code>D:\ocpp\ev-platform</code>.</p>
+<p>Phones must work for any country, not just India. Country codes are 1–3 digits and every country has its own local format, so don't hand-roll this: use <code>libphonenumber-js</code> (a port of Google's libphonenumber).</p>
+<div class="code"><div class="file"><span>terminal</span><button class="copy">Copy</button></div><pre><code>pnpm --filter @ev/db add libphonenumber-js</code></pre></div>
+<div class="code"><div class="file"><span>packages/db/src/phone.ts</span><button class="copy">Copy</button></div><pre><code>import { parsePhoneNumberFromString, type CountryCode } from &quot;libphonenumber-js&quot;;
+
+// One phone format everywhere: E.164, e.g. &quot;+919876543210&quot;, &quot;+447911123456&quot;.
+// defaultCountry is only used when the input has no &quot;+&lt;country code&gt;&quot; (an admin typing a local number).
+export function normalizePhone(input: string, defaultCountry: CountryCode): string {
+  const phone = parsePhoneNumberFromString(input, defaultCountry);
+  if (!phone || !phone.isValid()) throw new Error(`Invalid phone number: ${input}`);
+  return phone.number; // E.164
 }</code></pre></div>
+<div class="note"><strong>Where does <code>defaultCountry</code> come from?</strong> Telegram contacts always include the country code, so for drivers it doesn't matter. When a tenant admin types a member's number in the dashboard, pass the tenant's country (stored on <code>Tenant.country</code>, an ISO code like <code>IN</code> or <code>GB</code>).</div>
 <div class="code"><div class="file"><span>packages/db/src/index.ts</span><button class="copy">Copy</button></div><pre><code>export * from &quot;@prisma/client&quot;;
 export { prisma } from &quot;./client&quot;;
 export { normalizePhone } from &quot;./phone&quot;;</code></pre></div>
 <h2>Seed</h2>
 <p>Creates: a super admin, one tenant + tenant admin, one hybrid charger <code>CP_TEST01</code> (FLEET free + PUBLIC ₹18) with 2 connectors, one fleet member.</p>
 <div class="code"><div class="file"><span>packages/db/prisma/seed.ts</span><button class="copy">Copy</button></div><pre><code>import bcrypt from &quot;bcryptjs&quot;;
+import type { CountryCode } from &quot;libphonenumber-js&quot;;
 import { prisma } from &quot;../src/client&quot;;
+import { normalizePhone } from &quot;../src/phone&quot;;
 
 async function main() {
   const hash = await bcrypt.hash(&quot;admin123&quot;, 10);
@@ -282,7 +294,7 @@ async function main() {
 
   const tenant = await prisma.tenant.upsert({
     where: { slug: &quot;tata-fleet&quot; }, update: {},
-    create: { name: &quot;Tata Fleet&quot;, slug: &quot;tata-fleet&quot; },
+    create: { name: &quot;Tata Fleet&quot;, slug: &quot;tata-fleet&quot;, country: &quot;IN&quot; },
   });
 
   await prisma.adminUser.upsert({
@@ -306,10 +318,11 @@ async function main() {
     });
   }
 
-  // Put YOUR phone here to test fleet mode in Telegram.
+  // Put YOUR phone here (any format) to test fleet mode in Telegram. Always save phones normalized.
+  const phone = normalizePhone(&quot;99999 99999&quot;, tenant.country as CountryCode);
   await prisma.tenantMembership.upsert({
-    where: { tenantId_phone: { tenantId: tenant.id, phone: &quot;+919999999999&quot; } }, update: {},
-    create: { tenantId: tenant.id, phone: &quot;+919999999999&quot;, role: &quot;FLEET&quot;, name: &quot;Test Driver&quot; },
+    where: { tenantId_phone: { tenantId: tenant.id, phone } }, update: {},
+    create: { tenantId: tenant.id, phone, role: &quot;FLEET&quot;, name: &quot;Test Driver&quot; },
   });
 }
 
@@ -325,11 +338,14 @@ pnpm db:studio</code></pre></div>
 </ul>
 <h2>Prove the Docker image builds (without Docker on your PC)</h2>
 <p>The schema now exists, so the Day 1 <code>Dockerfile</code> can build. GitHub builds it for you on every push, and also publishes it to GitHub's free container registry (GHCR), which is where your server will pull it from on Day 14.</p>
+<div class="note"><strong>Where the files go:</strong> your git repo root is <code>D:\ocpp</code>, and the app is in <code>D:\ocpp\ev-platform</code>. GitHub only reads workflows from the <em>git root</em>, so create <code>D:\ocpp\.github\workflows\docker.yml</code> (not inside <code>ev-platform</code>). The <code>Dockerfile</code> stays in <code>ev-platform</code>, which is why the workflow sets <code>context: ./ev-platform</code>.</div>
 <div class="code"><div class="file"><span>.github/workflows/docker.yml</span><button class="copy">Copy</button></div><pre><code>name: docker
 on:
   push:
     branches: [main]
+    paths: ["ev-platform/**", ".github/workflows/docker.yml"] # guide/ edits don't need a new image
   pull_request:
+    paths: ["ev-platform/**", ".github/workflows/docker.yml"]
 
 permissions:
   contents: read
@@ -339,17 +355,17 @@ jobs:
   api-image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         if: github.event_name == 'push'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: .
+          context: ./ev-platform   # the app lives in this subfolder of the git repo
           push: ${{ github.event_name == 'push' }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/ev-api:latest
@@ -363,7 +379,7 @@ updates:
     schedule:
       interval: weekly</code></pre></div>
 <ul>
-<li><strong>Pin the actions to commit SHAs.</strong> A tag like <code>@v3</code> can be moved by the action's author, and this job can publish packages. For each <code>docker/*</code> action, open its GitHub Releases page, copy the full 40-character commit SHA of the release, and write <code>uses: docker/login-action@&lt;40-char-sha&gt; # v3.x.y</code>. Do the same for <code>actions/checkout</code>. Then add the Dependabot file below so the SHAs get updated for you.</li>
+<li><strong>Actions are pinned to commit SHAs</strong> (the version is in the comment). A tag like <code>@v4</code> can be moved by the action's author, and this job can publish packages; a SHA can't change. The Dependabot file below opens a PR when a new version comes out. To find a SHA yourself: <code>git ls-remote https://github.com/docker/login-action.git refs/tags/v4.7.0</code>.</li>
 <li>Pull requests only <em>build</em> the image (to catch Dockerfile mistakes). Pushes to <code>main</code> also publish it.</li>
 <li>Docker image names must be lowercase. If your GitHub username has capitals, replace <code>${{ github.repository_owner }}</code> with the lowercase name.</li>
 <li>Image tagged with the commit SHA = you can roll back to any older version on the server.</li>

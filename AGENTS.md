@@ -32,6 +32,8 @@ The developer is learning while building. Prefer simple, readable code over clev
 
 ## Repo layout
 
+Git root is `d:\ocpp`. The app lives in the `ev-platform/` subfolder: everything below except `AGENTS.md`, `guide/` and `.github/` is inside `ev-platform/`. Run pnpm commands from `ev-platform/`.
+
 ```
 AGENTS.md            ← this file
 guide/               ← day-by-day HTML build guide (open guide/index.html)
@@ -66,7 +68,7 @@ packages/
 ## Domain model (Prisma, `packages/db/prisma/schema.prisma`)
 
 - `AccessMode` enum: `PUBLIC`, `PRIVATE_MEMBER` (society resident/employee), `FLEET` (fleet driver).
-- `Tenant` — client company.
+- `Tenant` — client company. `country` (ISO code, default `IN`) is the default country for phone numbers its admins type.
 - `User` — a Telegram driver. `telegramId` unique, `phone` (E.164, unique, verified via Telegram contact), `walletBalance` Decimal.
 - `TenantMembership` — a phone number whitelisted by a tenant with role `FLEET` or `PRIVATE_MEMBER`. `userId` is **nullable**: admins add by phone before the driver ever opens the bot; we fill `userId` when the driver shares their contact. Unique `(tenantId, phone)`.
 - `ChargePoint` — `ocppId` unique (e.g. `CP_101`), belongs to one tenant, `allowedModes AccessMode[]` (hybrid support), `isOnline`, `lastSeenAt`.
@@ -90,7 +92,7 @@ packages/
 5. **Billing:** `energyKwh = (meterStopWh − meterStartWh) / 1000`, `amount = energyKwh × pricePerKwh` (2 dp), debit wallet in the same DB transaction. Must be idempotent (only bill ACTIVE sessions).
 6. **Money** uses Prisma `Decimal` (`@db.Decimal`), never JS floats for storage. Razorpay amounts are in **paise**.
 7. **Razorpay webhook:** verify HMAC-SHA256 signature over the **raw** body (mount before `express.json()`); credit only on `CREATED → PAID` flip (idempotent).
-8. **Phones** are always normalized with `normalizePhone()` (`+91XXXXXXXXXX`) before saving or comparing.
+8. **Phones** are always normalized with `normalizePhone(input, defaultCountry)` to **E.164** (`+<country code><number>`, any country) before saving or comparing. It uses `libphonenumber-js` and throws on invalid numbers. `defaultCountry` is the tenant's country (ISO code like `IN`, `GB`) and only matters for numbers typed without `+<code>`.
 9. Only accept a Telegram contact where `contact.user_id === ctx.from.id`.
 
 ## OCPP 1.6J conventions
@@ -155,7 +157,7 @@ Never commit `.env` files.
 
 The step-by-step guide lives in `guide/` (open `guide/index.html`). Update the checkboxes below at the end of each day so the assistant knows where we are.
 
-- [ ] Day 1 — Monorepo setup (pnpm, turbo, Neon Postgres, API Dockerfile)
+- [x] Day 1 — Monorepo setup (pnpm, turbo, Neon Postgres, API Dockerfile)
 - [ ] Day 2 — Prisma schema, migration, seed
 - [ ] Day 3 — `tenantDb` isolation extension
 - [ ] Day 4 — Access & tariff engine + tests

@@ -121,9 +121,11 @@ allowBuilds:
     &quot;strict&quot;: true,
     &quot;esModuleInterop&quot;: true,
     &quot;skipLibCheck&quot;: true,
-    &quot;resolveJsonModule&quot;: true
+    &quot;resolveJsonModule&quot;: true,
+    &quot;types&quot;: [&quot;node&quot;]
   }
 }</code></pre></div>
+<div class="note"><code>&quot;types&quot;: [&quot;node&quot;]</code> is required with TypeScript 6 and 7. They no longer load <code>@types/*</code> packages automatically, so without it you get <em>"Cannot find name 'process'"</em> even when <code>@types/node</code> is installed. Every package that uses Node APIs needs <code>@types/node</code> as a dev dependency (<code>@ev/api</code> and <code>@ev/db</code>).</div>
 <h2>2. Postgres (hosted, no Docker)</h2>
 <ol>
 <li>Sign up at <a href="https://neon.tech">neon.tech</a> (free tier). Create a project: Postgres version <strong>16</strong>, region as close to India as offered (Mumbai if available, otherwise Singapore). Later put your server in the same region, because every query crosses the network.</li>

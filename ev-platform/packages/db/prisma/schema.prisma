@@ -1,0 +1,158 @@
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider  = "postgresql"
+    url       = env("DATABASE_URL") // pooled: used by the running app
+    directUrl = env("DIRECT_URL") // direct: used by prisma migrate
+}
+
+enum AccessMode {
+    PUBLIC
+    PRIVATE_MEMBER // society resident / office employee
+    FLEET // commercial fleet driver
+}
+
+enum AdminRole {
+    SUPER_ADMIN
+    TENANT_ADMIN
+}
+
+enum SessionStatus {
+    PENDING // remote start sent, waiting for StartTransaction
+    ACTIVE
+    COMPLETED
+    FAILED
+}
+
+enum PaymentStatus {
+    CREATED
+    PAID
+    FAILED
+}
+
+model Tenant {
+    id           String              @id @default(uuid())
+    name         String
+    slug         String              @unique
+    country      String              @default("IN")
+    createdAt    DateTime            @default(now())
+    chargePoints ChargePoint[]
+    memberships  TenantMembership[]
+    sessions     ChargingSession[]
+    tariffRules  ChargerTariffRule[]
+    admins       AdminUser[]
+}
+
+model User {
+    id            String             @id @default(uuid())
+    telegramId    String             @unique
+    phone         String?            @unique // E.164, e.g. +919876543210
+    name          String?
+    walletBalance Decimal            @default(0) @db.Decimal(12, 2)
+    createdAt     DateTime           @default(now())
+    memberships   TenantMembership[]
+    sessions      ChargingSession[]
+    payments      Payment[]
+}
+
+model TenantMembership {
+    id        String     @id @default(uuid())
+    tenantId  String
+    phone     String // what the admin types in
+    userId    String? // filled when the driver shares their contact
+    role      AccessMode // FLEET or PRIVATE_MEMBER only
+    name      String?
+    vehicleNo String?
+    isActive  Boolean    @default(true)
+    tenant    Tenant     @relation(fields: [tenantId], references: [id])
+    user      User?      @relation(fields: [userId], references: [id])
+
+    @@unique([tenantId, phone])
+    @@unique([tenantId, userId])
+}
+
+model ChargePoint {
+    id           String              @id @default(uuid())
+    ocppId       String              @unique // "CP_101"
+    name         String?
+    tenantId     String
+    allowedModes AccessMode[] // ["FLEET"], ["FLEET","PUBLIC"], ...
+    isOnline     Boolean             @default(false)
+    lastSeenAt   DateTime?
+    tenant       Tenant              @relation(fields: [tenantId], references: [id])
+    connectors   Connector[]
+    tariffRules  ChargerTariffRule[]
+}
+
+model Connector {
+    id            String            @id @default(uuid())
+    chargePointId String
+    connectorId   Int // 1, 2 (OCPP number)
+    status        String            @default("Unavailable")
+    chargePoint   ChargePoint       @relation(fields: [chargePointId], references: [id])
+    sessions      ChargingSession[]
+
+    @@unique([chargePointId, connectorId])
+}
+
+model ChargerTariffRule {
+    id            String      @id @default(uuid())
+    chargePointId String
+    tenantId      String
+    mode          AccessMode
+    pricePerKwh   Decimal     @db.Decimal(10, 2)
+    chargePoint   ChargePoint @relation(fields: [chargePointId], references: [id])
+    tenant        Tenant      @relation(fields: [tenantId], references: [id])
+
+    @@unique([chargePointId, mode])
+}
+
+model ChargingSession {
+    id              String        @id @default(uuid())
+    transactionId   Int           @unique @default(autoincrement()) // sent to charger
+    idTag           String        @unique // random, ≤ 20 chars
+    userId          String
+    tenantId        String
+    connectorId     String
+    mode            AccessMode // locked at start
+    pricePerKwh     Decimal       @db.Decimal(10, 2) // locked at start
+    status          SessionStatus @default(PENDING)
+    meterStartWh    Int?
+    meterLastWh     Int?
+    meterStopWh     Int?
+    energyKwh       Decimal?      @db.Decimal(10, 3)
+    amount          Decimal?      @db.Decimal(12, 2)
+    telegramChatId  String?
+    statusMessageId Int? // the live message we keep editing
+    createdAt       DateTime      @default(now())
+    startedAt       DateTime?
+    stoppedAt       DateTime?
+    user            User          @relation(fields: [userId], references: [id])
+    tenant          Tenant        @relation(fields: [tenantId], references: [id])
+    connector       Connector     @relation(fields: [connectorId], references: [id])
+
+    @@index([tenantId, createdAt])
+    @@index([userId, status])
+}
+
+model AdminUser {
+    id           String    @id @default(uuid())
+    email        String    @unique
+    passwordHash String
+    role         AdminRole
+    tenantId     String? // null for SUPER_ADMIN
+    tenant       Tenant?   @relation(fields: [tenantId], references: [id])
+}
+
+model Payment {
+    id             String        @id @default(uuid())
+    userId         String
+    amount         Decimal       @db.Decimal(12, 2)
+    status         PaymentStatus @default(CREATED)
+    razorpayLinkId String?       @unique
+    createdAt      DateTime      @default(now())
+    paidAt         DateTime?
+    user           User          @relation(fields: [userId], references: [id])
+}
