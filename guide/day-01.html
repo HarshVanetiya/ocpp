@@ -154,12 +154,23 @@ pnpm --filter @ev/api add @ev/db@workspace:*</code></pre></div>
 <div class="code"><div class="file"><span>apps/api/package.json — scripts</span><button class="copy">Copy</button></div><pre><code>&quot;type&quot;: &quot;module&quot;,
 &quot;scripts&quot;: {
   &quot;dev&quot;: &quot;tsx watch src/index.ts&quot;,
-  &quot;build&quot;: &quot;tsup src/index.ts --format esm --noExternal @ev/db&quot;,
+  &quot;build&quot;: &quot;tsup&quot;,
   &quot;start&quot;: &quot;node dist/index.js&quot;,
   &quot;test&quot;: &quot;vitest run&quot;,
   &quot;sim&quot;: &quot;tsx scripts/sim.ts&quot;
 }</code></pre></div>
 <div class="code"><div class="file"><span>apps/api/tsconfig.json</span><button class="copy">Copy</button></div><pre><code>{ &quot;extends&quot;: &quot;../../tsconfig.base.json&quot;, &quot;include&quot;: [&quot;src&quot;, &quot;scripts&quot;] }</code></pre></div>
+<div class="code"><div class="file"><span>apps/api/tsup.config.ts</span><button class="copy">Copy</button></div><pre><code>import { defineConfig } from &quot;tsup&quot;;
+
+// Production build: bundles src/ into dist/index.js (the Docker image runs this file).
+export default defineConfig({
+  entry: [&quot;src/index.ts&quot;],
+  format: [&quot;esm&quot;],
+  target: &quot;es2022&quot;,
+  clean: true,
+  // @ev/db is TypeScript source that plain node can't run, so compile it into the bundle.
+  noExternal: [&quot;@ev/db&quot;],
+});</code></pre></div>
 <p>Temporary entry so <code>pnpm dev</code> works today:</p>
 <div class="code"><div class="file"><span>apps/api/src/index.ts</span><button class="copy">Copy</button></div><pre><code>import express from &quot;express&quot;;
 
@@ -213,7 +224,7 @@ HEALTHCHECK --interval=30s --timeout=3s CMD node -e &quot;fetch('http://localhos
 CMD [&quot;node&quot;, &quot;apps/api/dist/index.js&quot;]</code></pre></div>
 <ul>
 <li><strong>No secrets in the image.</strong> <code>.env</code> is excluded. The server passes <code>DATABASE_URL</code>, <code>JWT_SECRET</code> etc. as environment variables at run time. The same image works for staging and production.</li>
-<li><strong>Why <code>--noExternal @ev/db</code>?</strong> <code>@ev/db</code> is TypeScript source (<code>main: ./src/index.ts</code>), which plain <code>node</code> can't run. This flag makes <code>tsup</code> compile it into the API bundle.</li>
+<li><strong>Why <code>noExternal: [&quot;@ev/db&quot;]</code> in <code>tsup.config.ts</code>?</strong> <code>@ev/db</code> is TypeScript source (<code>main: ./src/index.ts</code>), which plain <code>node</code> can't run. This makes <code>tsup</code> compile it into the API bundle. (tsup 9 removed the <code>--noExternal</code> command-line flag, so it must be in the config file.)</li>
 <li>The image is bigger than it needs to be (it copies the whole build stage). That's fine for the MVP; you can slim it later.</li>
 <li><strong>This Dockerfile only builds after Day 2</strong>, because it needs the Prisma schema. Don't worry if you can't test it today.</li>
 </ul>

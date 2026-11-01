@@ -4,7 +4,7 @@
     "description": "",
     "scripts": {
         "dev": "tsx watch src/index.ts",
-        "build": "tsup src/index.ts --format esm --noExternal @ev/db",
+        "build": "tsup",
         "start": "node dist/index.js",
         "test": "vitest run",
         "sim": "tsx scripts/sim.ts"
